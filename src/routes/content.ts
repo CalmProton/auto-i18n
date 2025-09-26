@@ -45,14 +45,33 @@ contentRoutes.post('/', async (c) => {
       }
       return c.json(errorResponse, 500)
     }
+
+    const folderSummary = result.folderSummary ?? (() => {
+      const counts = new Map<string, number>()
+      for (const entry of contentRequest.files) {
+        const key = entry.folderPath ? entry.folderPath : '/'
+        counts.set(key, (counts.get(key) ?? 0) + 1)
+      }
+      return Array.from(counts.entries()).map(([name, fileCount]) => ({
+        name,
+        fileCount
+      }))
+    })()
+    const singleFolderName = folderSummary.length === 1 ? folderSummary[0].name : undefined
     
     const response: FileUploadResponse = {
       message: result.message,
       senderId: result.senderId,
       locale: contentRequest.locale,
-      folderName: contentRequest.folderName,
+      folderName: singleFolderName,
       filesProcessed: contentRequest.files.length,
-      files: contentRequest.files.map((f) => ({ name: f.name, size: f.size })),
+      files: contentRequest.files.map(({ file, folderPath, relativePath }) => ({
+        name: file.name,
+        size: file.size,
+        folder: folderPath || undefined,
+        relativePath
+      })),
+      folders: folderSummary,
       savedFiles: result.savedFiles
     }
     

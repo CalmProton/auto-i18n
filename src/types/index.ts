@@ -4,7 +4,7 @@ export interface FileUploadResponse {
   locale?: string
   folderName?: string
   filesProcessed?: number
-  files?: Array<{ name: string; size: number; folder?: string }>
+  files?: Array<{ name: string; size: number; folder?: string; relativePath?: string }>
   file?: { name: string; size: number }
   folders?: Array<{ name: string; fileCount: number }>
   savedFiles?: SavedFileInfo[]
@@ -21,6 +21,7 @@ export interface ProcessingResult {
   senderId?: string
   locale?: string
   folderName?: string
+  folderSummary?: Array<{ name: string; fileCount: number }>
   savedFiles?: SavedFileInfo[]
 }
 
@@ -49,8 +50,12 @@ interface BaseUploadRequest {
 }
 
 export interface ContentUploadRequest extends BaseUploadRequest {
-  folderName: string
-  files: File[]
+  files: Array<{
+    file: File
+    folderPath: string
+    relativePath: string
+    fieldKey?: string
+  }>
 }
 
 export interface GlobalUploadRequest extends BaseUploadRequest {

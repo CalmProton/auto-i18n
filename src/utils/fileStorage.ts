@@ -26,8 +26,23 @@ function ensureDirectory(path: string) {
 
 function buildDirectory({ senderId, locale, type, folderName }: SaveFileOptions): string {
   const baseDir = join(tempRoot, sanitizeSegment(senderId), sanitizeSegment(locale), type)
-  const targetDir = folderName ? join(baseDir, sanitizeSegment(folderName)) : baseDir
-  ensureDirectory(targetDir)
+  ensureDirectory(baseDir)
+
+  if (!folderName) {
+    return baseDir
+  }
+
+  const folderSegments = folderName
+    .split(/[\\/]/)
+    .map((segment) => sanitizeSegment(segment))
+    .filter((segment) => segment.length > 0)
+
+  let targetDir = baseDir
+  for (const segment of folderSegments) {
+    targetDir = join(targetDir, segment)
+    ensureDirectory(targetDir)
+  }
+
   return targetDir
 }
 

@@ -12,22 +12,42 @@ import { saveFileToTemp, saveFilesToTemp } from '../utils/fileStorage'
  * Structure: content/[locale]/[folder_name]/[files].md
  */
 export async function processContentFiles(request: ContentUploadRequest): Promise<ProcessingResult> {
-  const { locale, folderName, files, senderId } = request
+  const { locale, files, senderId } = request
+  const folderSummaryMap = new Map<string, number>()
+
+  for (const { folderPath } of files) {
+    const key = folderPath || '.'
+    folderSummaryMap.set(key, (folderSummaryMap.get(key) ?? 0) + 1)
+  }
+
+  const folderSummary = Array.from(folderSummaryMap.entries()).map(([name, fileCount]) => ({
+    name: name === '.' ? '/' : name,
+    fileCount
+  }))
+
+  const uniqueFolderCount = folderSummary.length
+  const folderDescriptor = uniqueFolderCount === 1
+    ? (folderSummary[0]?.name || 'root')
+    : `${uniqueFolderCount} folders`
+
   console.log(
-    `Processing ${files.length} content files (.md) from ${folderName} folder for locale: ${locale} (sender: ${senderId})`
+    `Processing ${files.length} content files (.md) from ${folderDescriptor} for locale: ${locale} (sender: ${senderId})`
   )
   
   try {
     const savedFiles = await saveFilesToTemp(
       { senderId, locale, type: 'content' },
-      files.map((file) => ({ file, folderName }))
+      files.map(({ file, folderPath }) => ({ file, folderName: folderPath }))
     )
 
     // TODO: Implement content file processing logic
     for (let index = 0; index < files.length; index += 1) {
-      const file = files[index]
+      const { file, folderPath, relativePath } = files[index]
       const saved = savedFiles[index]
-      console.log(`- Content file: ${file.name} (${file.size} bytes) saved to ${saved.path}`)
+      const displayPath = relativePath || file.name
+      console.log(
+        `- Content file: ${displayPath} (${file.size} bytes) saved to ${saved.path}`
+      )
       
       // Example: Read file content
       const content = await file.text()
@@ -43,11 +63,11 @@ export async function processContentFiles(request: ContentUploadRequest): Promis
     
     return {
       success: true,
-      message: `Successfully processed ${files.length} content files from ${folderName} folder`,
+      message: `Successfully processed ${files.length} content files across ${uniqueFolderCount} folder(s)`,
       processedCount: files.length,
       senderId,
       locale,
-      folderName,
+      folderSummary,
       savedFiles
     }
   } catch (error) {
@@ -57,7 +77,7 @@ export async function processContentFiles(request: ContentUploadRequest): Promis
       message: `Failed to process content files: ${error instanceof Error ? error.message : 'Unknown error'}`,
       senderId,
       locale,
-      folderName
+      folderSummary
     }
   }
 }

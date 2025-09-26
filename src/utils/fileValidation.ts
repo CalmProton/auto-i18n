@@ -11,7 +11,31 @@ export function validateContentFile(file: File): boolean {
  * Validates if a file is a valid JSON file
  */
 export function validateJsonFile(file: File): boolean {
-  return file.name.endsWith('.json') && (file.type === 'application/json' || file.type === '')
+  if (!file.name.endsWith('.json')) {
+    return false
+  }
+
+  const allowedTypes = new Set([
+    '',
+    'application/json',
+    'application/octet-stream',
+    'text/json',
+    'application/x-json',
+    'application/vnd.api+json',
+    'text/plain'
+  ])
+
+  const normalizedType = (file.type || '').split(';')[0]?.trim().toLowerCase() ?? ''
+
+  if (allowedTypes.has(normalizedType)) {
+    return true
+  }
+
+  if (normalizedType.includes('json')) {
+    return true
+  }
+
+  return false
 }
 
 /**
@@ -59,8 +83,7 @@ export function parseContentUpload(
   locale: string,
   senderId: string
 ): ContentUploadRequest | string {
-  const files: File[] = []
-  let folderName: string | null = null
+  const files: ContentUploadRequest['files'] = []
   
   for (const [key, value] of Object.entries(body)) {
     if (value instanceof File && key !== 'locale' && key !== 'senderId') {
@@ -68,20 +91,17 @@ export function parseContentUpload(
         return `Invalid content file: ${value.name}. Expected .md files.`
       }
       
-      // Extract folder name from field name (assuming format: folder_[folderName]_[filename])
-      if (key.startsWith('folder_')) {
-        const parts = key.split('_')
-        if (parts.length >= 3) {
-          const extractedFolder = parts[1]
-          if (!folderName) {
-            folderName = extractedFolder
-          } else if (folderName !== extractedFolder) {
-            return 'All files must be from the same folder'
-          }
-        }
+      const folderInfo = deriveFolderInfoFromField(key, value)
+      if (typeof folderInfo === 'string') {
+        return folderInfo
       }
-      
-      files.push(value)
+
+      files.push({
+        file: value,
+        folderPath: folderInfo.folderPath,
+        relativePath: folderInfo.relativePath,
+        fieldKey: key
+      })
     }
   }
   
@@ -89,15 +109,57 @@ export function parseContentUpload(
     return 'No valid content files provided'
   }
   
-  if (!folderName) {
-    return 'Folder name could not be determined from uploaded files'
-  }
-  
   return {
     locale,
     senderId,
-    folderName,
     files
+  }
+}
+
+function normalizeSegment(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+}
+
+function deriveFolderInfoFromField(fieldKey: string, file: File):
+  | { folderPath: string; relativePath: string }
+  | string {
+  if (!fieldKey.startsWith('folder_')) {
+    return `Invalid field name: ${fieldKey}. Expected format: folder_[folder_and_file_identifier]`
+  }
+
+  const keyWithoutPrefix = fieldKey.replace(/^folder_/, '')
+  if (!keyWithoutPrefix) {
+    return 'Folder information could not be determined from uploaded file field'
+  }
+
+  const keySegments = keyWithoutPrefix.split('_').filter(Boolean)
+  const baseName = file.name.replace(/\.[^./]+$/, '')
+  const normalizedBase = normalizeSegment(baseName)
+  const baseSegments = normalizedBase.length > 0 ? normalizedBase.split('_').filter(Boolean) : []
+
+  let folderSegments: string[] = []
+
+  if (baseSegments.length > 0 && keySegments.length >= baseSegments.length) {
+    const suffixSegments = keySegments.slice(-baseSegments.length)
+    if (suffixSegments.join('_') === baseSegments.join('_')) {
+      folderSegments = keySegments.slice(0, keySegments.length - baseSegments.length)
+    }
+  }
+
+  // Fallback: treat everything except the final segment as folder information
+  if (folderSegments.length === 0 && keySegments.length > 1) {
+    folderSegments = keySegments.slice(0, keySegments.length - 1)
+  }
+
+  const folderPath = folderSegments.join('/')
+  const relativePath = folderPath ? `${folderPath}/${file.name}` : file.name
+
+  return {
+    folderPath,
+    relativePath
   }
 }
 
