@@ -1,11 +1,13 @@
 export interface FileUploadResponse {
   message: string
+  senderId?: string
   locale?: string
   folderName?: string
   filesProcessed?: number
   files?: Array<{ name: string; size: number; folder?: string }>
   file?: { name: string; size: number }
   folders?: Array<{ name: string; fileCount: number }>
+  savedFiles?: SavedFileInfo[]
 }
 
 export interface ErrorResponse {
@@ -16,8 +18,10 @@ export interface ProcessingResult {
   success: boolean
   message: string
   processedCount?: number
+  senderId?: string
   locale?: string
   folderName?: string
+  savedFiles?: SavedFileInfo[]
 }
 
 export type FileType = 'content' | 'global' | 'page'
@@ -26,23 +30,34 @@ export interface ValidatedFile {
   file: File
   type: FileType
   locale: string
+  senderId: string
   folderName?: string
   originalPath?: string
 }
 
-export interface ContentUploadRequest {
+export interface SavedFileInfo {
+  name: string
+  size: number
+  path: string
+  folder?: string
+  type: FileType
+}
+
+interface BaseUploadRequest {
   locale: string
+  senderId: string
+}
+
+export interface ContentUploadRequest extends BaseUploadRequest {
   folderName: string
   files: File[]
 }
 
-export interface GlobalUploadRequest {
-  locale: string
+export interface GlobalUploadRequest extends BaseUploadRequest {
   file: File
 }
 
-export interface PageUploadRequest {
-  locale: string
+export interface PageUploadRequest extends BaseUploadRequest {
   folders: Array<{
     folderName: string
     file: File

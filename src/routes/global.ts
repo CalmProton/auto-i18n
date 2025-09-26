@@ -1,6 +1,6 @@
 import { Hono } from 'hono'
 import { processGlobalTranslation } from '../services/fileProcessor'
-import { extractLocale, parseGlobalUpload } from '../utils/fileValidation'
+import { extractLocale, extractSenderId, parseGlobalUpload } from '../utils/fileValidation'
 import type { FileUploadResponse, ErrorResponse } from '../types'
 
 const globalTranslationRoutes = new Hono()
@@ -11,17 +11,24 @@ globalTranslationRoutes.post('/', async (c) => {
   try {
     const body = await c.req.parseBody()
     
-    // Extract locale from query or body
+    // Extract locale and sender from query or body
     const locale = c.req.query('locale') || extractLocale(body)
+    const senderId = c.req.query('senderId') || extractSenderId(body)
     if (!locale) {
       const errorResponse: ErrorResponse = {
         error: 'Locale parameter is required'
       }
       return c.json(errorResponse, 400)
     }
+    if (!senderId) {
+      const errorResponse: ErrorResponse = {
+        error: 'Sender identifier is required'
+      }
+      return c.json(errorResponse, 400)
+    }
     
     // Parse and validate global upload request
-    const globalRequest = parseGlobalUpload(body, locale)
+  const globalRequest = parseGlobalUpload(body, locale, senderId)
     if (typeof globalRequest === 'string') {
       const errorResponse: ErrorResponse = {
         error: globalRequest
@@ -41,8 +48,10 @@ globalTranslationRoutes.post('/', async (c) => {
     
     const response: FileUploadResponse = {
       message: result.message,
+      senderId: result.senderId,
       locale: globalRequest.locale,
-      file: { name: globalRequest.file.name, size: globalRequest.file.size }
+      file: { name: globalRequest.file.name, size: globalRequest.file.size },
+      savedFiles: result.savedFiles
     }
     
     return c.json(response)

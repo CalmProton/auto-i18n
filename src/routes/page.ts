@@ -1,6 +1,6 @@
 import { Hono } from 'hono'
 import { processPageTranslations } from '../services/fileProcessor'
-import { extractLocale, parsePageUpload } from '../utils/fileValidation'
+import { extractLocale, extractSenderId, parsePageUpload } from '../utils/fileValidation'
 import type { FileUploadResponse, ErrorResponse } from '../types'
 
 const pageTranslationRoutes = new Hono()
@@ -11,17 +11,24 @@ pageTranslationRoutes.post('/', async (c) => {
   try {
     const body = await c.req.parseBody()
     
-    // Extract locale from query or body
+    // Extract locale and sender from query or body
     const locale = c.req.query('locale') || extractLocale(body)
+    const senderId = c.req.query('senderId') || extractSenderId(body)
     if (!locale) {
       const errorResponse: ErrorResponse = {
         error: 'Locale parameter is required'
       }
       return c.json(errorResponse, 400)
     }
+    if (!senderId) {
+      const errorResponse: ErrorResponse = {
+        error: 'Sender identifier is required'
+      }
+      return c.json(errorResponse, 400)
+    }
     
     // Parse and validate page upload request
-    const pageRequest = parsePageUpload(body, locale)
+  const pageRequest = parsePageUpload(body, locale, senderId)
     if (typeof pageRequest === 'string') {
       const errorResponse: ErrorResponse = {
         error: pageRequest
@@ -41,9 +48,11 @@ pageTranslationRoutes.post('/', async (c) => {
     
     const response: FileUploadResponse = {
       message: result.message,
+      senderId: result.senderId,
       locale: pageRequest.locale,
       filesProcessed: pageRequest.folders.length,
-      folders: pageRequest.folders.map(f => ({ name: f.folderName, fileCount: 1 }))
+      folders: pageRequest.folders.map((f) => ({ name: f.folderName, fileCount: 1 })),
+      savedFiles: result.savedFiles
     }
     
     return c.json(response)

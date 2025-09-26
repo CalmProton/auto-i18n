@@ -41,15 +41,29 @@ export function extractLocale(body: Record<string, unknown>): string | null {
 }
 
 /**
+ * Extracts senderId from query parameters or form data
+ */
+export function extractSenderId(body: Record<string, unknown>): string | null {
+  if (typeof body.senderId === 'string') {
+    return body.senderId
+  }
+  return null
+}
+
+/**
  * Parses content upload request from form data
  * Expected structure: content/[locale]/[folder_name]/[files].md
  */
-export function parseContentUpload(body: Record<string, unknown>, locale: string): ContentUploadRequest | string {
+export function parseContentUpload(
+  body: Record<string, unknown>,
+  locale: string,
+  senderId: string
+): ContentUploadRequest | string {
   const files: File[] = []
   let folderName: string | null = null
   
   for (const [key, value] of Object.entries(body)) {
-    if (value instanceof File && key !== 'locale') {
+    if (value instanceof File && key !== 'locale' && key !== 'senderId') {
       if (!validateContentFile(value)) {
         return `Invalid content file: ${value.name}. Expected .md files.`
       }
@@ -81,6 +95,7 @@ export function parseContentUpload(body: Record<string, unknown>, locale: string
   
   return {
     locale,
+    senderId,
     folderName,
     files
   }
@@ -90,11 +105,15 @@ export function parseContentUpload(body: Record<string, unknown>, locale: string
  * Parses global upload request from form data
  * Expected structure: [locale].json
  */
-export function parseGlobalUpload(body: Record<string, unknown>, locale: string): GlobalUploadRequest | string {
+export function parseGlobalUpload(
+  body: Record<string, unknown>,
+  locale: string,
+  senderId: string
+): GlobalUploadRequest | string {
   let globalFile: File | null = null
   
   for (const [key, value] of Object.entries(body)) {
-    if (value instanceof File && key !== 'locale') {
+    if (value instanceof File && key !== 'locale' && key !== 'senderId') {
       if (!validateGlobalFile(value, locale)) {
         return `Invalid global file: ${value.name}. Expected ${locale}.json`
       }
@@ -113,6 +132,7 @@ export function parseGlobalUpload(body: Record<string, unknown>, locale: string)
   
   return {
     locale,
+    senderId,
     file: globalFile
   }
 }
@@ -121,11 +141,15 @@ export function parseGlobalUpload(body: Record<string, unknown>, locale: string)
  * Parses page upload request from form data
  * Expected structure: multiple folders, each containing [locale].json
  */
-export function parsePageUpload(body: Record<string, unknown>, locale: string): PageUploadRequest | string {
+export function parsePageUpload(
+  body: Record<string, unknown>,
+  locale: string,
+  senderId: string
+): PageUploadRequest | string {
   const folders: Array<{ folderName: string; file: File }> = []
   
   for (const [key, value] of Object.entries(body)) {
-    if (value instanceof File && key !== 'locale') {
+    if (value instanceof File && key !== 'locale' && key !== 'senderId') {
       if (!validatePageFile(value, locale)) {
         return `Invalid page file: ${value.name}. Expected ${locale}.json files`
       }
@@ -150,6 +174,7 @@ export function parsePageUpload(body: Record<string, unknown>, locale: string): 
   
   return {
     locale,
+    senderId,
     folders
   }
 }
