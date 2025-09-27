@@ -93,7 +93,23 @@ function extractJobs(value: unknown): Array<Partial<TranslationJobMetadata>> {
     return []
   }
 
-  const payload = Array.isArray(value) ? value : [value]
+  let payload: unknown[]
+  
+  if (Array.isArray(value)) {
+    payload = value
+  } else if (typeof value === 'object' && value !== null) {
+    // Handle object with job IDs as keys: { "job-id": { type: "...", files: [...] } }
+    const jobsObj = value as Record<string, unknown>
+    payload = Object.entries(jobsObj).map(([jobId, jobData]) => {
+      if (typeof jobData === 'object' && jobData !== null) {
+        return { id: jobId, ...jobData }
+      }
+      return jobData
+    })
+  } else {
+    payload = [value]
+  }
+  
   const normalized: Array<Partial<TranslationJobMetadata>> = []
 
   for (const entry of payload) {

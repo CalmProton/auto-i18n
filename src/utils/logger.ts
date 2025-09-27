@@ -1,11 +1,25 @@
 import { existsSync, mkdirSync } from 'node:fs'
-import { join, resolve } from 'node:path'
+import { join, resolve, dirname } from 'node:path'
 import { inspect } from 'node:util'
 import winston from 'winston'
 
-const DEFAULT_LOG_DIR = '/tmp/logs'
+// Find the project root by looking for package.json
+function findProjectRoot(startPath: string = __dirname): string {
+  let currentPath = startPath
+  while (currentPath !== dirname(currentPath)) {
+    if (existsSync(join(currentPath, 'package.json'))) {
+      return currentPath
+    }
+    currentPath = dirname(currentPath)
+  }
+  // Fallback to current working directory if package.json not found
+  return process.cwd()
+}
+
+const projectRoot = findProjectRoot()
+const DEFAULT_LOG_DIR = join(projectRoot, 'tmp', 'logs')
 const LOG_DIR = resolve(process.env.AUTO_I18N_LOG_DIR ?? DEFAULT_LOG_DIR)
-const LOG_FILE_NAME = process.env.AUTO_I18N_LOG_FILE ?? 'auto-i18n.log'
+const LOG_FILE_NAME = process.env.AUTO_I18N_LOG_FILE ?? 'latest.log'
 const MAX_CONSOLE_META_LENGTH = Number.parseInt(process.env.AUTO_I18N_MAX_CONSOLE_META ?? '600', 10)
 
 function ensureLogDirectory(directory: string) {
