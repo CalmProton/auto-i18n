@@ -2,12 +2,15 @@ import { mkdirSync, existsSync } from 'node:fs'
 import { join, extname, basename } from 'node:path'
 import type { FileType, SavedFileInfo } from '../types'
 
-type SaveFileOptions = {
+type SavePathOptions = {
   senderId: string
   locale: string
   type: FileType
-  file: File
   folderName?: string
+}
+
+type SaveFileOptions = SavePathOptions & {
+  file: File
 }
 
 const DEFAULT_TEMP_ROOT = join(process.cwd(), 'tmp', 'uploads')
@@ -24,7 +27,7 @@ function ensureDirectory(path: string) {
   }
 }
 
-function buildDirectory({ senderId, locale, type, folderName }: SaveFileOptions): string {
+function buildDirectory({ senderId, locale, type, folderName }: SavePathOptions): string {
   const baseDir = join(tempRoot, sanitizeSegment(senderId), sanitizeSegment(locale), type)
   ensureDirectory(baseDir)
 
@@ -93,4 +96,24 @@ export async function saveFilesToTemp(
       saveFileToTemp({ ...options, file, folderName })
     )
   )
+}
+
+export async function saveTextToTemp(
+  options: SavePathOptions & { filename: string; content: string }
+): Promise<SavedFileInfo> {
+  const { filename, content, folderName, type } = options
+  const directory = buildDirectory(options)
+  const filePath = ensureUniqueFilePath(directory, filename)
+
+  await Bun.write(filePath, content)
+
+  const size = new TextEncoder().encode(content).length
+
+  return {
+    name: filename,
+    size,
+    path: filePath,
+    folder: folderName,
+    type
+  }
 }

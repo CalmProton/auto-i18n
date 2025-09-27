@@ -8,6 +8,7 @@ export interface FileUploadResponse {
   file?: { name: string; size: number }
   folders?: Array<{ name: string; fileCount: number }>
   savedFiles?: SavedFileInfo[]
+  translatedFiles?: SavedFileInfo[]
 }
 
 export interface ErrorResponse {
@@ -23,6 +24,7 @@ export interface ProcessingResult {
   folderName?: string
   folderSummary?: Array<{ name: string; fileCount: number }>
   savedFiles?: SavedFileInfo[]
+  translatedFiles?: SavedFileInfo[]
 }
 
 export type FileType = 'content' | 'global' | 'page'

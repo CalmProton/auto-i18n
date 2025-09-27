@@ -2,6 +2,7 @@ import { Hono } from 'hono'
 import { processContentFiles } from '../services/fileProcessor'
 import { extractLocale, extractSenderId, parseContentUpload } from '../utils/fileValidation'
 import type { FileUploadResponse, ErrorResponse } from '../types'
+import { isSupportedLocale } from '../config/locales'
 
 const contentRoutes = new Hono()
 
@@ -17,6 +18,12 @@ contentRoutes.post('/', async (c) => {
     if (!locale) {
       const errorResponse: ErrorResponse = {
         error: 'Locale parameter is required'
+      }
+      return c.json(errorResponse, 400)
+    }
+    if (!isSupportedLocale(locale)) {
+      const errorResponse: ErrorResponse = {
+        error: `Locale "${locale}" is not supported`
       }
       return c.json(errorResponse, 400)
     }
@@ -72,7 +79,8 @@ contentRoutes.post('/', async (c) => {
         relativePath
       })),
       folders: folderSummary,
-      savedFiles: result.savedFiles
+      savedFiles: result.savedFiles,
+      translatedFiles: result.translatedFiles
     }
     
     return c.json(response)

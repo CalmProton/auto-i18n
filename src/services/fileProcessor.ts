@@ -6,6 +6,8 @@ import type {
   SavedFileInfo
 } from '../types'
 import { saveFileToTemp, saveFilesToTemp } from '../utils/fileStorage'
+import { translateContentFiles } from './translation/contentProcessor'
+import { translateGlobalFile, translatePageFiles } from './translation/jsonProcessor'
 
 /**
  * Processes content files from a single folder
@@ -40,7 +42,13 @@ export async function processContentFiles(request: ContentUploadRequest): Promis
       files.map(({ file, folderPath }) => ({ file, folderName: folderPath }))
     )
 
-    // TODO: Implement content file processing logic
+    let translatedFiles: SavedFileInfo[] = []
+    try {
+      translatedFiles = await translateContentFiles(request)
+    } catch (translationError) {
+      console.error('Error translating content files:', translationError)
+    }
+
     for (let index = 0; index < files.length; index += 1) {
       const { file, folderPath, relativePath } = files[index]
       const saved = savedFiles[index]
@@ -48,17 +56,10 @@ export async function processContentFiles(request: ContentUploadRequest): Promis
       console.log(
         `- Content file: ${displayPath} (${file.size} bytes) saved to ${saved.path}`
       )
-      
-      // Example: Read file content
-      const content = await file.text()
-      console.log(`  Content preview: ${content.substring(0, 100)}...`)
-      
-      // Here you would implement:
-      // - Markdown parsing
-      // - Content extraction for the specific locale
-      // - Translation key identification
-      // - Integration with translation services
-      // - Folder-specific processing logic
+    }
+
+    if (translatedFiles.length > 0) {
+      console.log(`Generated ${translatedFiles.length} translated content file(s).`)
     }
     
     return {
@@ -68,7 +69,8 @@ export async function processContentFiles(request: ContentUploadRequest): Promis
       senderId,
       locale,
       folderSummary,
-      savedFiles
+      savedFiles,
+      translatedFiles
     }
   } catch (error) {
     console.error('Error processing content files:', error)
@@ -91,30 +93,38 @@ export async function processGlobalTranslation(request: GlobalUploadRequest): Pr
   console.log(`Processing global translation file: ${file.name} for locale: ${locale} (sender: ${senderId})`)
   
   try {
-    const savedFile = await saveFileToTemp({ senderId, locale, type: 'global', file })
+  const savedFile = await saveFileToTemp({ senderId, locale, type: 'global', file })
+    let translatedFiles: SavedFileInfo[] = []
+    try {
+      translatedFiles = await translateGlobalFile(request)
+    } catch (translationError) {
+      console.error('Error translating global file:', translationError)
+    }
 
     const content = await file.text()
     console.log(`- Global translation content length: ${content.length} characters`)
     console.log(`- Saved global translation to ${savedFile.path}`)
     
     // TODO: Implement global translation processing logic
-    const translations = JSON.parse(content)
-    console.log(`- Found ${Object.keys(translations).length} translation keys`)
-    
-    // Here you would implement:
-    // - Translation validation for specific locale
-    // - Key structure analysis
-    // - Integration with translation management
-    // - Conflict resolution with existing translations
-    // - Locale-specific processing logic
-    
+    try {
+      const translations = JSON.parse(content)
+      console.log(`- Found ${Object.keys(translations).length} translation keys`)
+    } catch (error) {
+      console.warn('Unable to parse uploaded global translation JSON for logging.', error)
+    }
+
+    if (translatedFiles.length > 0) {
+      console.log(`Generated ${translatedFiles.length} translated global file(s).`)
+    }
+
     return {
       success: true,
       message: `Successfully processed global translation file for ${locale}`,
       processedCount: 1,
       senderId,
       locale,
-      savedFiles: [savedFile]
+      savedFiles: [savedFile],
+      translatedFiles
     }
   } catch (error) {
     console.error('Error processing global translation file:', error)
@@ -140,34 +150,33 @@ export async function processPageTranslations(request: PageUploadRequest): Promi
       { senderId, locale, type: 'page' },
       folders.map(({ file, folderName }) => ({ file, folderName }))
     )
+    let translatedFiles: SavedFileInfo[] = []
+    try {
+      translatedFiles = await translatePageFiles(request)
+    } catch (translationError) {
+      console.error('Error translating page files:', translationError)
+    }
 
-    // TODO: Implement page translation processing logic
     for (let index = 0; index < folders.length; index += 1) {
       const { folderName, file } = folders[index]
       const saved = savedFiles[index]
       console.log(
         `- Page translation folder: ${folderName}, file: ${file.name} (${file.size} bytes) saved to ${saved.path}`
       )
-      
-      const content = await file.text()
-      const translations = JSON.parse(content)
-      console.log(`  Found ${Object.keys(translations).length} page-specific translation keys`)
-      
-      // Here you would implement:
-      // - Page-specific translation validation for locale
-      // - Translation key mapping by folder
-      // - Integration with content files
-      // - Hierarchical translation management
-      // - Folder-based organization logic
     }
-    
+
+    if (translatedFiles.length > 0) {
+      console.log(`Generated ${translatedFiles.length} translated page file(s).`)
+    }
+
     return {
       success: true,
       message: `Successfully processed ${folders.length} page translation folders for ${locale}`,
       processedCount: folders.length,
       senderId,
       locale,
-      savedFiles
+      savedFiles,
+      translatedFiles
     }
   } catch (error) {
     console.error('Error processing page translation files:', error)

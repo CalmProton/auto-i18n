@@ -2,6 +2,7 @@ import { Hono } from 'hono'
 import { processGlobalTranslation } from '../services/fileProcessor'
 import { extractLocale, extractSenderId, parseGlobalUpload } from '../utils/fileValidation'
 import type { FileUploadResponse, ErrorResponse } from '../types'
+import { isSupportedLocale } from '../config/locales'
 
 const globalTranslationRoutes = new Hono()
 
@@ -17,6 +18,12 @@ globalTranslationRoutes.post('/', async (c) => {
     if (!locale) {
       const errorResponse: ErrorResponse = {
         error: 'Locale parameter is required'
+      }
+      return c.json(errorResponse, 400)
+    }
+    if (!isSupportedLocale(locale)) {
+      const errorResponse: ErrorResponse = {
+        error: `Locale "${locale}" is not supported`
       }
       return c.json(errorResponse, 400)
     }
@@ -51,7 +58,8 @@ globalTranslationRoutes.post('/', async (c) => {
       senderId: result.senderId,
       locale: globalRequest.locale,
       file: { name: globalRequest.file.name, size: globalRequest.file.size },
-      savedFiles: result.savedFiles
+      savedFiles: result.savedFiles,
+      translatedFiles: result.translatedFiles
     }
     
     return c.json(response)
