@@ -2,11 +2,12 @@ import { existsSync, readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { createScopedLogger } from '../utils/logger'
 
-export type TranslationProvider = 'openai' | 'anthropic'
+export type TranslationProvider = 'openai' | 'anthropic' | 'deepseek'
 
 export type ProviderConfig = {
   apiKey: string
   model?: string
+  baseUrl?: string
 }
 
 type TranslationConfig = {
@@ -87,6 +88,9 @@ function toTranslationProvider(value: string | undefined): TranslationProvider {
   if (normalized === 'anthropic') {
     return 'anthropic'
   }
+  if (normalized === 'deepseek') {
+    return 'deepseek'
+  }
   return 'openai'
 }
 
@@ -101,20 +105,29 @@ function readEnv(name: string): string | undefined {
   return undefined
 }
 
-function readProviderConfig(keyEnv: string, modelEnv: string): ProviderConfig | undefined {
+function readProviderConfig(keyEnv: string, modelEnv: string, urlEnv?: string): ProviderConfig | undefined {
   const apiKey = readEnv(keyEnv)
   if (!apiKey) {
     return undefined
   }
   const model = readEnv(modelEnv)
-  return model ? { apiKey, model } : { apiKey }
+  const baseUrl = urlEnv ? readEnv(urlEnv) : undefined
+  const config: ProviderConfig = { apiKey }
+  if (model) {
+    config.model = model
+  }
+  if (baseUrl) {
+    config.baseUrl = baseUrl
+  }
+  return config
 }
 
 export function loadTranslationConfig(): TranslationConfig {
   const provider = toTranslationProvider(readEnv('TRANSLATION_PROVIDER'))
 
-  const openaiConfig = readProviderConfig('OPENAI_API_KEY', 'OPENAI_MODEL')
-  const anthropicConfig = readProviderConfig('ANTHROPIC_API_KEY', 'ANTHROPIC_MODEL')
+  const openaiConfig = readProviderConfig('OPENAI_API_KEY', 'OPENAI_MODEL', 'OPENAI_API_URL')
+  const anthropicConfig = readProviderConfig('ANTHROPIC_API_KEY', 'ANTHROPIC_MODEL', 'ANTHROPIC_API_URL')
+  const deepseekConfig = readProviderConfig('DEEPSEEK_API_KEY', 'DEEPSEEK_MODEL', 'DEEPSEEK_API_URL')
 
   const providers: Partial<Record<TranslationProvider, ProviderConfig>> = {}
   if (openaiConfig) {
@@ -123,13 +136,18 @@ export function loadTranslationConfig(): TranslationConfig {
   if (anthropicConfig) {
     providers.anthropic = anthropicConfig
   }
+  if (deepseekConfig) {
+    providers.deepseek = deepseekConfig
+  }
 
   const providerConfig = providers[provider]
 
   if (!providerConfig) {
     const missing = provider === 'openai'
       ? ['OPENAI_API_KEY']
-      : ['ANTHROPIC_API_KEY']
+      : provider === 'anthropic'
+        ? ['ANTHROPIC_API_KEY']
+        : ['DEEPSEEK_API_KEY']
     throw new Error(
       `Translation provider "${provider}" is selected but missing configuration. ` +
       `Expected env vars: ${missing.join(', ')}`
@@ -139,7 +157,8 @@ export function loadTranslationConfig(): TranslationConfig {
   log.info('Loaded translation provider configuration', {
     provider,
     openaiConfigured: Boolean(openaiConfig),
-    anthropicConfigured: Boolean(anthropicConfig)
+    anthropicConfigured: Boolean(anthropicConfig),
+    deepseekConfigured: Boolean(deepseekConfig)
   })
 
   return { provider, providerConfig, providers }

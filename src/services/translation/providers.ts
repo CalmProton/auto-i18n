@@ -19,6 +19,8 @@ import type {
 
 const DEFAULT_OPENAI_MODEL = 'gpt-4o-2024-08-06'
 const DEFAULT_ANTHROPIC_MODEL = 'claude-3-haiku-20240307'
+const DEFAULT_DEEPSEEK_MODEL = 'deepseek-chat'
+const DEFAULT_DEEPSEEK_BASE_URL = 'https://api.deepseek.com'
 
 const baseLogger = createScopedLogger('translation:provider')
 
@@ -121,7 +123,8 @@ class OpenAIProvider implements TranslationProviderAdapter {
   constructor(private readonly config: ProviderConfig) {
     this.model = config.model && config.model.trim().length > 0 ? config.model : DEFAULT_OPENAI_MODEL
     this.client = new OpenAI({
-      apiKey: config.apiKey
+      apiKey: config.apiKey,
+      ...(config.baseUrl ? { baseURL: config.baseUrl } : {})
     })
     this.log = baseLogger.child({ provider: this.name, model: this.model })
   }
@@ -351,6 +354,181 @@ class OpenAIProvider implements TranslationProviderAdapter {
   }
 }
 
+class DeepseekProvider implements TranslationProviderAdapter {
+  public readonly name = 'deepseek' as const
+  public readonly isFallback = false
+
+  private readonly model: string
+  private readonly client: OpenAI
+  private readonly log: Logger
+  private readonly baseURL: string
+
+  constructor(private readonly config: ProviderConfig) {
+    this.model = config.model && config.model.trim().length > 0 ? config.model : DEFAULT_DEEPSEEK_MODEL
+    this.baseURL = config.baseUrl && config.baseUrl.trim().length > 0 ? config.baseUrl : DEFAULT_DEEPSEEK_BASE_URL
+    this.client = new OpenAI({
+      apiKey: config.apiKey,
+      baseURL: this.baseURL
+    })
+    this.log = baseLogger.child({ provider: this.name, model: this.model, baseURL: this.baseURL })
+  }
+
+  async translateMarkdown(job: MarkdownTranslationInput): Promise<string> {
+    const prompt = buildMarkdownTranslationPrompt(job.sourceLocale, job.targetLocale)
+
+    try {
+      this.log.info('Sending markdown translation request', {
+        senderId: job.senderId,
+        sourceLocale: job.sourceLocale,
+        targetLocale: job.targetLocale,
+        filePath: job.filePath,
+        contentLength: job.content.length,
+        contentPreview: previewText(job.content, 300)
+      })
+
+      const response = await this.client.chat.completions.create({
+        model: this.model,
+        messages: [
+          {
+            role: 'system',
+            content: TRANSLATION_SYSTEM_PROMPT
+          },
+          {
+            role: 'user',
+            content: `${prompt}\n\n---\n${job.content}\n---\n\n${MARKDOWN_RESPONSE_DIRECTIVE}`
+          }
+        ],
+        temperature: 0,
+        max_tokens: 4096
+      })
+
+      const text = this.extractMessageText(response)
+
+      this.log.info('Received markdown translation response', {
+        senderId: job.senderId,
+        sourceLocale: job.sourceLocale,
+        targetLocale: job.targetLocale,
+        filePath: job.filePath,
+        responseLength: text.length,
+        responsePreview: previewText(text, 300)
+      })
+
+      return text.trim().length > 0 ? text : job.content
+    } catch (error) {
+      this.log.error('Markdown translation failed', {
+        senderId: job.senderId,
+        sourceLocale: job.sourceLocale,
+        targetLocale: job.targetLocale,
+        filePath: job.filePath,
+        error
+      })
+      throw error
+    }
+  }
+
+  async translateJson(job: JsonTranslationInput): Promise<unknown> {
+    const prompt = buildJsonTranslationPrompt(job.sourceLocale, job.targetLocale)
+    const example = this.buildExampleJson(job.data)
+
+    try {
+      this.log.info('Sending JSON translation request', {
+        senderId: job.senderId,
+        sourceLocale: job.sourceLocale,
+        targetLocale: job.targetLocale,
+        filePath: job.filePath,
+        dataType: jsonType(job.data)
+      })
+
+      const response = await this.client.chat.completions.create({
+        model: this.model,
+        messages: [
+          {
+            role: 'system',
+            content: `${TRANSLATION_SYSTEM_PROMPT}\nThis task requires json output.`
+          },
+          {
+            role: 'user',
+            content: `${prompt}\n\nInput JSON:\n${stringifyJson(job.data)}\n\nEXAMPLE JSON OUTPUT (structure must exactly match the input JSON):\n${example}\n\n${JSON_TRANSLATION_WRAPPER_DIRECTIVE}\n${JSON_RESPONSE_DIRECTIVE}`
+          }
+        ],
+        temperature: 0,
+        max_tokens: 4096,
+        response_format: {
+          type: 'json_object'
+        }
+      })
+
+      const text = this.extractMessageText(response)
+
+      this.log.info('Received JSON translation response', {
+        senderId: job.senderId,
+        sourceLocale: job.sourceLocale,
+        targetLocale: job.targetLocale,
+        filePath: job.filePath,
+        responseLength: text.length,
+        responsePreview: previewText(text, 300)
+      })
+
+      const parsed = parseJsonResponse(text) as { translation: unknown }
+
+      if (jsonType(job.data) !== jsonType(parsed.translation)) {
+        this.log.warn('JSON translation response type mismatch, returning original data', {
+          senderId: job.senderId,
+          sourceLocale: job.sourceLocale,
+          targetLocale: job.targetLocale,
+          filePath: job.filePath,
+          expected: jsonType(job.data),
+          received: jsonType(parsed.translation)
+        })
+        return cloneValue(job.data)
+      }
+
+      return parsed.translation
+    } catch (error) {
+      this.log.error('JSON translation failed', {
+        senderId: job.senderId,
+        sourceLocale: job.sourceLocale,
+        targetLocale: job.targetLocale,
+        filePath: job.filePath,
+        error
+      })
+      throw error
+    }
+  }
+
+  private extractMessageText(response: OpenAI.Chat.Completions.ChatCompletion): string {
+    const firstChoice = response.choices?.[0]
+    const content = firstChoice?.message?.content
+
+    if (typeof content === 'string') {
+      return content
+    }
+
+    if (Array.isArray(content)) {
+      return (content as Array<any>)
+        .map((part: any) => {
+          if (typeof part === 'string') {
+            return part
+          }
+          if (part && part.type === 'text' && typeof part.text === 'string') {
+            return part.text
+          }
+          return ''
+        })
+        .join('')
+    }
+
+    throw new Error('Deepseek returned empty response')
+  }
+
+  private buildExampleJson(data: unknown): string {
+    const example = {
+      translation: cloneValue(data)
+    }
+    return stringifyJson(example)
+  }
+}
+
 class AnthropicProvider implements TranslationProviderAdapter {
   public readonly name = 'anthropic' as const
   public readonly isFallback = false
@@ -522,6 +700,9 @@ function createProvider(): TranslationProviderAdapter {
     }
     if (config.provider === 'anthropic') {
       return new AnthropicProvider(config.providerConfig)
+    }
+    if (config.provider === 'deepseek') {
+      return new DeepseekProvider(config.providerConfig)
     }
     return new NoOpTranslationProvider()
   } catch (error) {
