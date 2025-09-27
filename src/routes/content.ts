@@ -3,8 +3,10 @@ import { processContentFiles, triggerContentTranslation } from '../services/file
 import { extractLocale, extractSenderId, parseContentUpload } from '../utils/fileValidation'
 import type { FileUploadResponse, ErrorResponse } from '../types'
 import { isSupportedLocale } from '../config/locales'
+import { createScopedLogger } from '../utils/logger'
 
 const contentRoutes = new Hono()
+const log = createScopedLogger('routes:content')
 
 // Upload endpoint for content files
 // Structure: content/[locale]/[folder_name]/[files].md
@@ -15,6 +17,11 @@ contentRoutes.post('/', async (c) => {
     // Extract locale and sender from query or body
     const locale = c.req.query('locale') || extractLocale(body)
     const senderId = c.req.query('senderId') || extractSenderId(body)
+    log.info('Received content upload request', {
+      locale,
+      senderId,
+      bodyKeys: Object.keys(body ?? {}).filter((key) => key !== 'locale' && key !== 'senderId')
+    })
     if (!locale) {
       const errorResponse: ErrorResponse = {
         error: 'Locale parameter is required'
@@ -40,16 +47,32 @@ contentRoutes.post('/', async (c) => {
       const errorResponse: ErrorResponse = {
         error: contentRequest
       }
+      log.warn('Content upload validation failed', {
+        locale,
+        senderId,
+        reason: contentRequest
+      })
       return c.json(errorResponse, 400)
     }
     
     // Process the files
+    log.info('Processing content upload', {
+      senderId: contentRequest.senderId,
+      locale: contentRequest.locale,
+      fileCount: contentRequest.files.length
+    })
+
     const result = await processContentFiles(contentRequest)
     
     if (!result.success) {
       const errorResponse: ErrorResponse = {
         error: result.message
       }
+      log.error('Content upload processing failed', {
+        senderId: contentRequest.senderId,
+        locale: contentRequest.locale,
+        message: result.message
+      })
       return c.json(errorResponse, 500)
     }
 
@@ -83,11 +106,18 @@ contentRoutes.post('/', async (c) => {
       translatedFiles: result.translatedFiles,
       translationPending: true
     }
+
+    log.info('Content upload processed successfully', {
+      senderId: result.senderId,
+      locale: contentRequest.locale,
+      filesProcessed: contentRequest.files.length,
+      folders: folderSummary
+    })
     
   return c.json(response, 202)
     
   } catch (error) {
-    console.error('Error processing content files:', error)
+    log.error('Error processing content files', { error })
     const errorResponse: ErrorResponse = {
       error: 'Failed to process content files'
     }
@@ -102,6 +132,11 @@ contentRoutes.post('/trigger', async (c) => {
       || (payload && typeof payload.locale === 'string' ? payload.locale : null)
     const senderId = c.req.query('senderId')
       || (payload && typeof payload.senderId === 'string' ? payload.senderId : null)
+
+    log.info('Received content translation trigger', {
+      locale,
+      senderId
+    })
 
     if (!locale) {
       const errorResponse: ErrorResponse = {
@@ -128,6 +163,12 @@ contentRoutes.post('/trigger', async (c) => {
       const errorResponse: ErrorResponse = {
         error: result.message
       }
+      log.error('Content translation trigger failed', {
+        senderId,
+        locale,
+        statusCode: result.statusCode ?? 500,
+        message: result.message
+      })
       if (result.statusCode === 404) {
         return c.json(errorResponse, 404)
       }
@@ -147,9 +188,16 @@ contentRoutes.post('/trigger', async (c) => {
       translationPending: true
     }
 
+    log.info('Content translation trigger accepted', {
+      senderId: result.senderId,
+      locale: result.locale,
+      filesProcessed: result.processedCount,
+      folders: result.folderSummary
+    })
+
     return c.json(response, 202)
   } catch (error) {
-    console.error('Error triggering content translation:', error)
+    log.error('Error triggering content translation', { error })
     const errorResponse: ErrorResponse = {
       error: 'Failed to trigger content translation'
     }

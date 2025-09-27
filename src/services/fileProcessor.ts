@@ -11,6 +11,9 @@ import type {
 import { resolveUploadPath, saveFileToTemp, saveFilesToTemp } from '../utils/fileStorage'
 import { translateContentFiles } from './translation/contentProcessor'
 import { translateGlobalFile, translatePageFiles } from './translation/jsonProcessor'
+import { createScopedLogger } from '../utils/logger'
+
+const log = createScopedLogger('services:fileProcessor')
 
 /**
  * Processes content files from a single folder
@@ -35,9 +38,13 @@ export async function processContentFiles(request: ContentUploadRequest): Promis
     ? (folderSummary[0]?.name || 'root')
     : `${uniqueFolderCount} folders`
 
-  console.log(
-    `Processing ${files.length} content files (.md) from ${folderDescriptor} for locale: ${locale} (sender: ${senderId})`
-  )
+  log.info('Processing content files', {
+    senderId,
+    locale,
+    fileCount: files.length,
+    folderDescriptor,
+    folderSummary
+  })
   
   try {
     const savedFiles = await saveFilesToTemp(
@@ -49,9 +56,13 @@ export async function processContentFiles(request: ContentUploadRequest): Promis
       const { file, folderPath, relativePath } = files[index]
       const saved = savedFiles[index]
       const displayPath = relativePath || file.name
-      console.log(
-        `- Content file: ${displayPath} (${file.size} bytes) saved to ${saved.path}`
-      )
+      log.info('Content file saved', {
+        senderId,
+        locale,
+        displayPath,
+        size: file.size,
+        savedPath: saved.path
+      })
     }
 
     return {
@@ -65,7 +76,11 @@ export async function processContentFiles(request: ContentUploadRequest): Promis
       translatedFiles: []
     }
   } catch (error) {
-    console.error('Error processing content files:', error)
+    log.error('Error processing content files', {
+      senderId,
+      locale,
+      error
+    })
     return {
       success: false,
       message: `Failed to process content files: ${error instanceof Error ? error.message : 'Unknown error'}`,
@@ -82,21 +97,39 @@ export async function processContentFiles(request: ContentUploadRequest): Promis
  */
 export async function processGlobalTranslation(request: GlobalUploadRequest): Promise<ProcessingResult> {
   const { locale, file, senderId } = request
-  console.log(`Processing global translation file: ${file.name} for locale: ${locale} (sender: ${senderId})`)
+  log.info('Processing global translation file', {
+    senderId,
+    locale,
+    fileName: file.name,
+    fileSize: file.size
+  })
   
   try {
   const savedFile = await saveFileToTemp({ senderId, locale, type: 'global', file, category: 'uploads' })
 
     const content = await file.text()
-    console.log(`- Global translation content length: ${content.length} characters`)
-    console.log(`- Saved global translation to ${savedFile.path}`)
+    log.info('Global translation file saved', {
+      senderId,
+      locale,
+      savedPath: savedFile.path,
+      contentLength: content.length
+    })
     
     // TODO: Implement global translation processing logic
     try {
       const translations = JSON.parse(content)
-      console.log(`- Found ${Object.keys(translations).length} translation keys`)
+      log.debug('Parsed uploaded global translation JSON', {
+        senderId,
+        locale,
+        keyCount: Object.keys(translations).length
+      })
     } catch (error) {
-      console.warn('Unable to parse uploaded global translation JSON for logging.', error)
+      log.warn('Unable to parse uploaded global translation JSON for logging', {
+        senderId,
+        locale,
+        fileName: file.name,
+        error
+      })
     }
 
     return {
@@ -109,7 +142,12 @@ export async function processGlobalTranslation(request: GlobalUploadRequest): Pr
       translatedFiles: []
     }
   } catch (error) {
-    console.error('Error processing global translation file:', error)
+    log.error('Error processing global translation file', {
+      senderId,
+      locale,
+      fileName: file.name,
+      error
+    })
     return {
       success: false,
       message: `Failed to process global translation file: ${error instanceof Error ? error.message : 'Unknown error'}`,
@@ -125,7 +163,12 @@ export async function processGlobalTranslation(request: GlobalUploadRequest): Pr
  */
 export async function processPageTranslations(request: PageUploadRequest): Promise<ProcessingResult> {
   const { locale, folders, senderId } = request
-  console.log(`Processing ${folders.length} page translation folders for locale: ${locale} (sender: ${senderId})`)
+  log.info('Processing page translation files', {
+    senderId,
+    locale,
+    folderCount: folders.length,
+    folders: folders.map(({ folderName }) => folderName)
+  })
   
   try {
     const savedFiles: SavedFileInfo[] = await saveFilesToTemp(
@@ -137,9 +180,14 @@ export async function processPageTranslations(request: PageUploadRequest): Promi
     for (let index = 0; index < folders.length; index += 1) {
       const { folderName, file } = folders[index]
       const saved = savedFiles[index]
-      console.log(
-        `- Page translation folder: ${folderName}, file: ${file.name} (${file.size} bytes) saved to ${saved.path}`
-      )
+      log.info('Page translation folder saved', {
+        senderId,
+        locale,
+        folderName,
+        fileName: file.name,
+        size: file.size,
+        savedPath: saved.path
+      })
     }
 
     return {
@@ -152,7 +200,11 @@ export async function processPageTranslations(request: PageUploadRequest): Promi
       translatedFiles: []
     }
   } catch (error) {
-    console.error('Error processing page translation files:', error)
+    log.error('Error processing page translation files', {
+      senderId,
+      locale,
+      error
+    })
     return {
       success: false,
       message: `Failed to process page translation files: ${error instanceof Error ? error.message : 'Unknown error'}`,
@@ -204,7 +256,18 @@ export async function triggerContentTranslation(options: {
   const { senderId, locale } = options
   const rootDir = resolveUploadPath({ senderId, locale, type: 'content', category: 'uploads' })
 
+  log.info('Received content translation trigger', {
+    senderId,
+    locale,
+    rootDir
+  })
+
   if (!existsSync(rootDir)) {
+    log.warn('No saved content uploads found for translation', {
+      senderId,
+      locale,
+      rootDir
+    })
     return {
       success: false,
       message: `No saved content uploads found for sender "${senderId}" and locale "${locale}"`,
@@ -218,7 +281,12 @@ export async function triggerContentTranslation(options: {
   try {
     sources = await collectContentSourceFiles(rootDir)
   } catch (error) {
-    console.error('Error reading saved content uploads:', error)
+    log.error('Error reading saved content uploads', {
+      senderId,
+      locale,
+      rootDir,
+      error
+    })
     return {
       success: false,
       message: `Failed to read saved content uploads: ${error instanceof Error ? error.message : 'Unknown error'}`,
@@ -229,6 +297,11 @@ export async function triggerContentTranslation(options: {
   }
 
   if (sources.length === 0) {
+    log.warn('No markdown files found for scheduled content translation', {
+      senderId,
+      locale,
+      rootDir
+    })
     return {
       success: false,
       message: `No markdown files were found for sender "${senderId}" and locale "${locale}"`,
@@ -257,8 +330,21 @@ export async function triggerContentTranslation(options: {
     type: 'content'
   }))
 
+  log.info('Scheduling content translation task', {
+    senderId,
+    locale,
+    fileCount: sources.length,
+    folders: folderSummary
+  })
+
   const runTranslation = async () => {
     try {
+      log.info('Starting background content translation', {
+        senderId,
+        locale,
+        fileCount: sources.length
+      })
+
       const files: ContentUploadRequest['files'] = await Promise.all(
         sources.map(async ({ folderPath, filePath, fileName }) => {
           const arrayBuffer = await Bun.file(filePath).arrayBuffer()
@@ -278,11 +364,17 @@ export async function triggerContentTranslation(options: {
         senderId,
         files
       })
-      console.log(
-        `[translation] Content translation task finished for sender ${senderId}, locale ${locale} (${files.length} file(s))`
-      )
+      log.info('Content translation task completed', {
+        senderId,
+        locale,
+        fileCount: files.length
+      })
     } catch (error) {
-      console.error('[translation] Background content translation failed:', error)
+      log.error('Background content translation failed', {
+        senderId,
+        locale,
+        error
+      })
     }
   }
 
@@ -343,7 +435,18 @@ export async function triggerPageTranslation(options: {
   const { senderId, locale } = options
   const rootDir = resolveUploadPath({ senderId, locale, type: 'page', category: 'uploads' })
 
+  log.info('Received page translation trigger', {
+    senderId,
+    locale,
+    rootDir
+  })
+
   if (!existsSync(rootDir)) {
+    log.warn('No saved page uploads found for translation', {
+      senderId,
+      locale,
+      rootDir
+    })
     return {
       success: false,
       message: `No saved page uploads found for sender "${senderId}" and locale "${locale}"`,
@@ -357,7 +460,12 @@ export async function triggerPageTranslation(options: {
   try {
     sources = await collectPageSourceFiles(rootDir, locale)
   } catch (error) {
-    console.error('Error reading saved page uploads:', error)
+    log.error('Error reading saved page uploads', {
+      senderId,
+      locale,
+      rootDir,
+      error
+    })
     return {
       success: false,
       message: `Failed to read saved page uploads: ${error instanceof Error ? error.message : 'Unknown error'}`,
@@ -368,6 +476,11 @@ export async function triggerPageTranslation(options: {
   }
 
   if (sources.length === 0) {
+    log.warn('No page JSON files found for translation', {
+      senderId,
+      locale,
+      rootDir
+    })
     return {
       success: false,
       message: `No source page files named "${locale}.json" were found for sender "${senderId}"`,
@@ -385,8 +498,21 @@ export async function triggerPageTranslation(options: {
     type: 'page'
   }))
 
+  log.info('Scheduling page translation task', {
+    senderId,
+    locale,
+    folderCount: sources.length,
+    folders: sources.map(({ folderName }) => folderName)
+  })
+
   const runTranslation = async () => {
     try {
+      log.info('Starting background page translation', {
+        senderId,
+        locale,
+        folderCount: sources.length
+      })
+
       const folders = await Promise.all(
         sources.map(async ({ folderName, filePath, fileName }) => {
           const arrayBuffer = await Bun.file(filePath).arrayBuffer()
@@ -403,11 +529,17 @@ export async function triggerPageTranslation(options: {
         senderId,
         folders
       })
-      console.log(
-        `[translation] Page translation task finished for sender ${senderId}, locale ${locale} (${folders.length} folder(s))`
-      )
+      log.info('Page translation task completed', {
+        senderId,
+        locale,
+        folderCount: folders.length
+      })
     } catch (error) {
-      console.error('[translation] Background page translation failed:', error)
+      log.error('Background page translation failed', {
+        senderId,
+        locale,
+        error
+      })
     }
   }
 
@@ -431,7 +563,18 @@ export async function triggerGlobalTranslation(options: {
   const { senderId, locale } = options
   const directory = resolveUploadPath({ senderId, locale, type: 'global', category: 'uploads' })
 
+  log.info('Received global translation trigger', {
+    senderId,
+    locale,
+    directory
+  })
+
   if (!existsSync(directory)) {
+    log.warn('No saved global uploads found for translation', {
+      senderId,
+      locale,
+      directory
+    })
     return {
       success: false,
       message: `No saved global uploads found for sender "${senderId}" and locale "${locale}"`,
@@ -464,7 +607,12 @@ export async function triggerGlobalTranslation(options: {
       }
     }
   } catch (error) {
-    console.error('Error reading saved global uploads:', error)
+    log.error('Error reading saved global uploads', {
+      senderId,
+      locale,
+      directory,
+      error
+    })
     return {
       success: false,
       message: `Failed to read saved global uploads: ${error instanceof Error ? error.message : 'Unknown error'}`,
@@ -475,6 +623,11 @@ export async function triggerGlobalTranslation(options: {
   }
 
   if (!candidateFile) {
+    log.warn('No JSON files available for global translation trigger', {
+      senderId,
+      locale,
+      directory
+    })
     return {
       success: false,
       message: `No JSON files were found for sender "${senderId}" and locale "${locale}"`,
@@ -491,8 +644,21 @@ export async function triggerGlobalTranslation(options: {
     type: 'global'
   }]
 
+  log.info('Scheduling global translation task', {
+    senderId,
+    locale,
+    fileName: candidateFile.fileName,
+    size: candidateFile.size
+  })
+
   const runTranslation = async () => {
     try {
+      log.info('Starting background global translation', {
+        senderId,
+        locale,
+        fileName: candidateFile?.fileName
+      })
+
       const arrayBuffer = await Bun.file(candidateFile.filePath).arrayBuffer()
       const file = new File([arrayBuffer], candidateFile.fileName, { type: 'application/json' })
 
@@ -501,11 +667,18 @@ export async function triggerGlobalTranslation(options: {
         senderId,
         file
       })
-      console.log(
-        `[translation] Global translation task finished for sender ${senderId}, locale ${locale} (file: ${candidateFile.fileName})`
-      )
+      log.info('Global translation task completed', {
+        senderId,
+        locale,
+        fileName: candidateFile.fileName
+      })
     } catch (error) {
-      console.error('[translation] Background global translation failed:', error)
+      log.error('Background global translation failed', {
+        senderId,
+        locale,
+        fileName: candidateFile?.fileName,
+        error
+      })
     }
   }
 

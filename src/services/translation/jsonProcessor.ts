@@ -3,17 +3,24 @@ import { SUPPORTED_LOCALES } from '../../config/locales'
 import { saveTextToTemp } from '../../utils/fileStorage'
 import { isJsonEmpty } from '../../utils/fileValidation'
 import { getTranslationProvider } from './providers'
+import { createScopedLogger } from '../../utils/logger'
 
 function getTargetLocales(sourceLocale: string): string[] {
   return SUPPORTED_LOCALES.map((locale) => locale.code).filter((code) => code !== sourceLocale)
 }
+
+const log = createScopedLogger('translation:json')
 
 async function parseJsonFile(file: File, descriptor: string): Promise<unknown | null> {
   try {
     const text = await file.text()
     return JSON.parse(text)
   } catch (error) {
-    console.error(`[translation] Unable to parse JSON for ${descriptor}:`, error)
+    log.error('Unable to parse JSON file', {
+      descriptor,
+      fileName: file.name,
+      error
+    })
     return null
   }
 }
@@ -30,7 +37,10 @@ function ensureObjectOrArray(value: unknown, descriptor: string): value is Recor
   if (value && (typeof value === 'object')) {
     return true
   }
-  console.error(`[translation] Expected JSON object/array for ${descriptor} but received ${typeof value}`)
+  log.error('Expected JSON object/array but received invalid type', {
+    descriptor,
+    receivedType: typeof value
+  })
   return false
 }
 
@@ -38,12 +48,28 @@ export async function translateGlobalFile(request: GlobalUploadRequest): Promise
   const provider = getTranslationProvider()
   const targetLocales = getTargetLocales(request.locale)
 
+  log.info('Preparing global JSON translation', {
+    senderId: request.senderId,
+    sourceLocale: request.locale,
+    fileName: request.file.name,
+    targetLocales,
+    provider: provider.name,
+    isFallback: provider.isFallback
+  })
+
   if (provider.isFallback) {
-    console.warn('[translation] Provider not configured. Skipping global translation step.')
+    log.warn('Translation provider not configured. Skipping global translation step.', {
+      senderId: request.senderId,
+      sourceLocale: request.locale
+    })
     return []
   }
 
   if (targetLocales.length === 0) {
+    log.info('No target locales available for global translation', {
+      senderId: request.senderId,
+      sourceLocale: request.locale
+    })
     return []
   }
 
@@ -54,7 +80,11 @@ export async function translateGlobalFile(request: GlobalUploadRequest): Promise
 
   // Check if the JSON is empty and skip translation if so
   if (isJsonEmpty(parsed)) {
-    console.log(`[translation] Skipping empty global JSON file: ${request.file.name}`)
+    log.info('Skipping empty global JSON file', {
+      senderId: request.senderId,
+      sourceLocale: request.locale,
+      fileName: request.file.name
+    })
     return []
   }
 
@@ -62,6 +92,12 @@ export async function translateGlobalFile(request: GlobalUploadRequest): Promise
 
   for (const targetLocale of targetLocales) {
     try {
+      log.info('Translating global JSON file', {
+        senderId: request.senderId,
+        sourceLocale: request.locale,
+        targetLocale,
+        fileName: request.file.name
+      })
       const result = await provider.translateJson({
         senderId: request.senderId,
         sourceLocale: request.locale,
@@ -84,8 +120,20 @@ export async function translateGlobalFile(request: GlobalUploadRequest): Promise
       })
 
       translated.push(saved)
+      log.info('Saved translated global JSON', {
+        senderId: request.senderId,
+        targetLocale,
+        path: saved.path,
+        size: saved.size
+      })
     } catch (error) {
-      console.error(`[translation] Failed to translate global file to ${targetLocale}. Stopping translation process for remaining locales.`, error)
+      log.error('Failed to translate global JSON file', {
+        senderId: request.senderId,
+        sourceLocale: request.locale,
+        targetLocale,
+        fileName: request.file.name,
+        error
+      })
       break
     }
   }
@@ -97,12 +145,29 @@ export async function translatePageFiles(request: PageUploadRequest): Promise<Sa
   const provider = getTranslationProvider()
   const targetLocales = getTargetLocales(request.locale)
 
+  log.info('Preparing page JSON translation', {
+    senderId: request.senderId,
+    sourceLocale: request.locale,
+    folderCount: request.folders.length,
+    folderNames: request.folders.map((folder) => folder.folderName),
+    targetLocales,
+    provider: provider.name,
+    isFallback: provider.isFallback
+  })
+
   if (provider.isFallback) {
-    console.warn('[translation] Provider not configured. Skipping page translation step.')
+    log.warn('Translation provider not configured. Skipping page translation step.', {
+      senderId: request.senderId,
+      sourceLocale: request.locale
+    })
     return []
   }
 
   if (targetLocales.length === 0) {
+    log.info('No target locales available for page translation', {
+      senderId: request.senderId,
+      sourceLocale: request.locale
+    })
     return []
   }
 
@@ -126,11 +191,23 @@ export async function translatePageFiles(request: PageUploadRequest): Promise<Sa
 
       // Check if the JSON is empty and skip translation if so
       if (isJsonEmpty(item.parsed)) {
-        console.log(`[translation] Skipping empty page JSON file: ${item.folder.folderName}/${item.folder.file.name}`)
+        log.info('Skipping empty page JSON file', {
+          senderId: request.senderId,
+          sourceLocale: request.locale,
+          folderName: item.folder.folderName,
+          fileName: item.folder.file.name
+        })
         continue
       }
 
       try {
+        log.info('Translating page JSON folder', {
+          senderId: request.senderId,
+          sourceLocale: request.locale,
+          targetLocale,
+          folderName: item.folder.folderName,
+          fileName: item.folder.file.name
+        })
         const result = await provider.translateJson({
           senderId: request.senderId,
           sourceLocale: request.locale,
@@ -154,11 +231,22 @@ export async function translatePageFiles(request: PageUploadRequest): Promise<Sa
         })
 
         translated.push(saved)
+        log.info('Saved translated page JSON', {
+          senderId: request.senderId,
+          targetLocale,
+          folderName: item.folder.folderName,
+          path: saved.path,
+          size: saved.size
+        })
       } catch (error) {
-        console.error(
-          `[translation] Failed to translate page folder "${item.folder.folderName}" to ${targetLocale}. Stopping translation process for remaining locales.`,
+        log.error('Failed to translate page JSON folder', {
+          senderId: request.senderId,
+          sourceLocale: request.locale,
+          targetLocale,
+          folderName: item.folder.folderName,
+          fileName: item.folder.file.name,
           error
-        )
+        })
         translationFailed = true
         break
       }

@@ -1,5 +1,6 @@
 import { existsSync, readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
+import { createScopedLogger } from '../utils/logger'
 
 export type TranslationProvider = 'openai' | 'anthropic'
 
@@ -15,6 +16,7 @@ type TranslationConfig = {
 }
 
 let envLoaded = false
+const log = createScopedLogger('config:env')
 
 function ensureEnvLoaded(): void {
   if (envLoaded) {
@@ -76,7 +78,7 @@ function ensureEnvLoaded(): void {
       process.env[key] = value
     }
   } catch (error) {
-    console.warn('[env] Unable to automatically load .env file in Node runtime.', error)
+    log.warn('Unable to automatically load .env file in Node runtime', { error })
   }
 }
 
@@ -133,6 +135,12 @@ export function loadTranslationConfig(): TranslationConfig {
       `Expected env vars: ${missing.join(', ')}`
     )
   }
+
+  log.info('Loaded translation provider configuration', {
+    provider,
+    openaiConfigured: Boolean(openaiConfig),
+    anthropicConfigured: Boolean(anthropicConfig)
+  })
 
   return { provider, providerConfig, providers }
 }

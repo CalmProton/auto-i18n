@@ -3,8 +3,10 @@ import { processPageTranslations, triggerPageTranslation } from '../services/fil
 import { extractLocale, extractSenderId, parsePageUpload } from '../utils/fileValidation'
 import type { FileUploadResponse, ErrorResponse } from '../types'
 import { isSupportedLocale } from '../config/locales'
+import { createScopedLogger } from '../utils/logger'
 
 const pageTranslationRoutes = new Hono()
+const log = createScopedLogger('routes:page')
 
 // Upload endpoint for page translation files
 // Structure: multiple folders, each containing [locale].json
@@ -15,6 +17,11 @@ pageTranslationRoutes.post('/', async (c) => {
     // Extract locale and sender from query or body
     const locale = c.req.query('locale') || extractLocale(body)
     const senderId = c.req.query('senderId') || extractSenderId(body)
+    log.info('Received page translation upload', {
+      locale,
+      senderId,
+      bodyKeys: Object.keys(body ?? {}).filter((key) => key !== 'locale' && key !== 'senderId')
+    })
     if (!locale) {
       const errorResponse: ErrorResponse = {
         error: 'Locale parameter is required'
@@ -40,16 +47,33 @@ pageTranslationRoutes.post('/', async (c) => {
       const errorResponse: ErrorResponse = {
         error: pageRequest
       }
+      log.warn('Page translation upload validation failed', {
+        locale,
+        senderId,
+        reason: pageRequest
+      })
       return c.json(errorResponse, 400)
     }
     
     // Process the files
+    log.info('Processing page translation upload', {
+      senderId: pageRequest.senderId,
+      locale: pageRequest.locale,
+      folderCount: pageRequest.folders.length,
+      folderNames: pageRequest.folders.map(folder => folder.folderName)
+    })
+
     const result = await processPageTranslations(pageRequest)
     
     if (!result.success) {
       const errorResponse: ErrorResponse = {
         error: result.message
       }
+      log.error('Page translation upload failed', {
+        senderId: pageRequest.senderId,
+        locale: pageRequest.locale,
+        message: result.message
+      })
       return c.json(errorResponse, 500)
     }
     
@@ -63,11 +87,18 @@ pageTranslationRoutes.post('/', async (c) => {
       translatedFiles: result.translatedFiles,
       translationPending: true
     }
+
+    log.info('Page translation upload stored successfully', {
+      senderId: result.senderId,
+      locale: pageRequest.locale,
+      filesProcessed: pageRequest.folders.length,
+      folders: pageRequest.folders.map((f) => f.folderName)
+    })
     
   return c.json(response, 202)
     
   } catch (error) {
-    console.error('Error processing page translation files:', error)
+    log.error('Error processing page translation files', { error })
     const errorResponse: ErrorResponse = {
       error: 'Failed to process page translation files'
     }
@@ -82,6 +113,11 @@ pageTranslationRoutes.post('/trigger', async (c) => {
       || (payload && typeof payload.locale === 'string' ? payload.locale : null)
     const senderId = c.req.query('senderId')
       || (payload && typeof payload.senderId === 'string' ? payload.senderId : null)
+
+    log.info('Received page translation trigger', {
+      locale,
+      senderId
+    })
 
     if (!locale) {
       const errorResponse: ErrorResponse = {
@@ -108,6 +144,12 @@ pageTranslationRoutes.post('/trigger', async (c) => {
       const errorResponse: ErrorResponse = {
         error: result.message
       }
+      log.error('Page translation trigger failed', {
+        senderId,
+        locale,
+        statusCode: result.statusCode ?? 500,
+        message: result.message
+      })
       if (result.statusCode === 404) {
         return c.json(errorResponse, 404)
       }
@@ -126,9 +168,16 @@ pageTranslationRoutes.post('/trigger', async (c) => {
       translationPending: true
     }
 
+    log.info('Page translation trigger accepted', {
+      senderId: result.senderId,
+      locale: result.locale,
+      filesProcessed: result.processedCount,
+      savedFiles: result.savedFiles
+    })
+
     return c.json(response)
   } catch (error) {
-    console.error('Error triggering page translation:', error)
+    log.error('Error triggering page translation', { error })
     const errorResponse: ErrorResponse = {
       error: 'Failed to trigger page translation'
     }
