@@ -48,6 +48,50 @@ export interface SavedFileInfo {
   type: FileType
 }
 
+export type TranslationFileType = FileType
+
+export interface TranslationFileDescriptor {
+  type: TranslationFileType
+  /** Relative path to the source file stored under tmp/<senderId>/uploads/<sourceLocale>/<type> */
+  sourceTempRelativePath: string
+  /** Path to the source file in the upstream repository */
+  repositorySourcePath: string
+  /** Optional explicit pattern for generating target repository paths (use :locale placeholder). */
+  targetPathPattern?: string
+  /** Optional explicit pattern for locating translated files in tmp (use :locale placeholder). */
+  translationTempPathPattern?: string
+  /** Optional human friendly label for logs. */
+  label?: string
+}
+
+export interface TranslationJobMetadata {
+  senderId: string
+  repository: {
+    owner: string
+    name: string
+    baseBranch: string
+    baseCommitSha: string
+  }
+  sourceLocale: string
+  targetLocales?: string[]
+  files: TranslationFileDescriptor[]
+  issue?: {
+    title?: string
+    body?: string
+  }
+  pullRequest?: {
+    title?: string
+    body?: string
+    baseBranch?: string
+  }
+  branch?: {
+    name?: string
+    prefix?: string
+  }
+  createdAt: string
+  updatedAt: string
+}
+
 interface BaseUploadRequest {
   locale: string
   senderId: string
