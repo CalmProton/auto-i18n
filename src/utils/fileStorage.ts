@@ -2,7 +2,7 @@ import { mkdirSync, existsSync } from 'node:fs'
 import { join, extname, basename } from 'node:path'
 import type { FileType, SavedFileInfo } from '../types'
 
-type SavePathOptions = {
+export type SavePathOptions = {
   senderId: string
   locale: string
   type: FileType
@@ -47,6 +47,21 @@ function buildDirectory({ senderId, locale, type, folderName }: SavePathOptions)
   }
 
   return targetDir
+}
+
+export function resolveUploadPath({ senderId, locale, type, folderName }: SavePathOptions): string {
+  const baseDir = join(tempRoot, sanitizeSegment(senderId), sanitizeSegment(locale), type)
+
+  if (!folderName) {
+    return baseDir
+  }
+
+  const folderSegments = folderName
+    .split(/[\\/]/)
+    .map((segment) => sanitizeSegment(segment))
+    .filter((segment) => segment.length > 0)
+
+  return folderSegments.reduce((dir, segment) => join(dir, segment), baseDir)
 }
 
 function ensureUniqueFilePath(directory: string, originalName: string): string {

@@ -9,6 +9,7 @@ export interface FileUploadResponse {
   folders?: Array<{ name: string; fileCount: number }>
   savedFiles?: SavedFileInfo[]
   translatedFiles?: SavedFileInfo[]
+  translationPending?: boolean
 }
 
 export interface ErrorResponse {
@@ -25,6 +26,7 @@ export interface ProcessingResult {
   folderSummary?: Array<{ name: string; fileCount: number }>
   savedFiles?: SavedFileInfo[]
   translatedFiles?: SavedFileInfo[]
+  statusCode?: number
 }
 
 export type FileType = 'content' | 'global' | 'page'

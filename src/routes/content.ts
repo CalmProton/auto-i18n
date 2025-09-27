@@ -1,5 +1,5 @@
 import { Hono } from 'hono'
-import { processContentFiles } from '../services/fileProcessor'
+import { processContentFiles, triggerContentTranslation } from '../services/fileProcessor'
 import { extractLocale, extractSenderId, parseContentUpload } from '../utils/fileValidation'
 import type { FileUploadResponse, ErrorResponse } from '../types'
 import { isSupportedLocale } from '../config/locales'
@@ -80,15 +80,78 @@ contentRoutes.post('/', async (c) => {
       })),
       folders: folderSummary,
       savedFiles: result.savedFiles,
-      translatedFiles: result.translatedFiles
+      translatedFiles: result.translatedFiles,
+      translationPending: true
     }
     
-    return c.json(response)
+  return c.json(response, 202)
     
   } catch (error) {
     console.error('Error processing content files:', error)
     const errorResponse: ErrorResponse = {
       error: 'Failed to process content files'
+    }
+    return c.json(errorResponse, 500)
+  }
+})
+
+contentRoutes.post('/trigger', async (c) => {
+  try {
+    const payload = (await c.req.json().catch(() => ({}))) as Record<string, unknown> | null
+    const locale = c.req.query('locale')
+      || (payload && typeof payload.locale === 'string' ? payload.locale : null)
+    const senderId = c.req.query('senderId')
+      || (payload && typeof payload.senderId === 'string' ? payload.senderId : null)
+
+    if (!locale) {
+      const errorResponse: ErrorResponse = {
+        error: 'Locale parameter is required'
+      }
+      return c.json(errorResponse, 400)
+    }
+    if (!isSupportedLocale(locale)) {
+      const errorResponse: ErrorResponse = {
+        error: `Locale "${locale}" is not supported`
+      }
+      return c.json(errorResponse, 400)
+    }
+    if (!senderId) {
+      const errorResponse: ErrorResponse = {
+        error: 'Sender identifier is required'
+      }
+      return c.json(errorResponse, 400)
+    }
+
+    const result = await triggerContentTranslation({ senderId, locale })
+
+    if (!result.success) {
+      const errorResponse: ErrorResponse = {
+        error: result.message
+      }
+      if (result.statusCode === 404) {
+        return c.json(errorResponse, 404)
+      }
+      if (result.statusCode === 400) {
+        return c.json(errorResponse, 400)
+      }
+      return c.json(errorResponse, 500)
+    }
+
+    const response: FileUploadResponse = {
+      message: result.message,
+      senderId: result.senderId,
+      locale: result.locale,
+      filesProcessed: result.processedCount,
+      folders: result.folderSummary,
+      savedFiles: result.savedFiles,
+      translationPending: true
+    }
+
+    return c.json(response)
+  } catch (error) {
+    console.error('Error triggering content translation:', error)
+    const errorResponse: ErrorResponse = {
+      error: 'Failed to trigger content translation'
     }
     return c.json(errorResponse, 500)
   }
