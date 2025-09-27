@@ -240,3 +240,37 @@ export function parsePageUpload(
     folders
   }
 }
+
+/**
+ * Checks if a parsed JSON object/array is effectively empty and doesn't need translation
+ * Returns true if the JSON is empty, null, or contains only empty structures
+ */
+export function isJsonEmpty(data: unknown): boolean {
+  if (data === null || data === undefined) {
+    return true
+  }
+
+  if (Array.isArray(data)) {
+    return data.length === 0 || data.every(item => isJsonEmpty(item))
+  }
+
+  if (typeof data === 'object' && data !== null) {
+    const obj = data as Record<string, unknown>
+    const keys = Object.keys(obj)
+    
+    if (keys.length === 0) {
+      return true
+    }
+    
+    // Check if all values are empty
+    return keys.every(key => isJsonEmpty(obj[key]))
+  }
+
+  // For primitive values (string, number, boolean), consider empty strings as empty
+  if (typeof data === 'string') {
+    return data.trim().length === 0
+  }
+
+  // Non-empty primitive values (numbers, booleans) are not considered empty
+  return false
+}

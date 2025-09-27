@@ -4,7 +4,6 @@ import { resolve } from 'node:path'
 export type TranslationProvider = 'openai' | 'anthropic'
 
 export type ProviderConfig = {
-  url: string
   apiKey: string
   model?: string
 }
@@ -100,21 +99,20 @@ function readEnv(name: string): string | undefined {
   return undefined
 }
 
-function readProviderConfig(urlEnv: string, keyEnv: string, modelEnv: string): ProviderConfig | undefined {
-  const url = readEnv(urlEnv)
+function readProviderConfig(keyEnv: string, modelEnv: string): ProviderConfig | undefined {
   const apiKey = readEnv(keyEnv)
-  if (!url || !apiKey) {
+  if (!apiKey) {
     return undefined
   }
   const model = readEnv(modelEnv)
-  return model ? { url, apiKey, model } : { url, apiKey }
+  return model ? { apiKey, model } : { apiKey }
 }
 
 export function loadTranslationConfig(): TranslationConfig {
   const provider = toTranslationProvider(readEnv('TRANSLATION_PROVIDER'))
 
-  const openaiConfig = readProviderConfig('OPENAI_API_URL', 'OPENAI_API_KEY', 'OPENAI_MODEL')
-  const anthropicConfig = readProviderConfig('ANTHROPIC_API_URL', 'ANTHROPIC_API_KEY', 'ANTHROPIC_MODEL')
+  const openaiConfig = readProviderConfig('OPENAI_API_KEY', 'OPENAI_MODEL')
+  const anthropicConfig = readProviderConfig('ANTHROPIC_API_KEY', 'ANTHROPIC_MODEL')
 
   const providers: Partial<Record<TranslationProvider, ProviderConfig>> = {}
   if (openaiConfig) {
@@ -128,8 +126,8 @@ export function loadTranslationConfig(): TranslationConfig {
 
   if (!providerConfig) {
     const missing = provider === 'openai'
-      ? ['OPENAI_API_URL', 'OPENAI_API_KEY']
-      : ['ANTHROPIC_API_URL', 'ANTHROPIC_API_KEY']
+      ? ['OPENAI_API_KEY']
+      : ['ANTHROPIC_API_KEY']
     throw new Error(
       `Translation provider "${provider}" is selected but missing configuration. ` +
       `Expected env vars: ${missing.join(', ')}`

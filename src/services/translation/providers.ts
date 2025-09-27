@@ -1,5 +1,7 @@
 import { z, type ZodTypeAny } from 'zod'
 import { zodTextFormat } from 'openai/helpers/zod'
+import OpenAI from 'openai'
+import Anthropic from '@anthropic-ai/sdk'
 import { getTranslationConfig, type ProviderConfig } from '../../config/env'
 import { SUPPORTED_LOCALES } from '../../config/locales'
 import type {
@@ -8,7 +10,7 @@ import type {
   JsonTranslationInput
 } from './types'
 
-const DEFAULT_OPENAI_MODEL = 'gpt-4o-mini'
+const DEFAULT_OPENAI_MODEL = 'gpt-4o-2024-08-06'
 const DEFAULT_ANTHROPIC_MODEL = 'claude-3-haiku-20240307'
 
 function cloneValue<T>(value: T): T {
@@ -23,16 +25,6 @@ function cloneValue<T>(value: T): T {
     return value
   }
   return JSON.parse(json)
-}
-
-function fallbackText(original: string, providerName: string, reason: unknown): string {
-  console.warn(`[translation] ${providerName} markdown translation failed, falling back to original text.`, reason)
-  return original
-}
-
-function fallbackJson(original: unknown, providerName: string, reason: unknown): unknown {
-  console.warn(`[translation] ${providerName} json translation failed, falling back to source data.`, reason)
-  return cloneValue(original)
 }
 
 function stringifyJson(data: unknown): string {
@@ -76,7 +68,7 @@ function buildSchemaFromJson(value: unknown): ZodTypeAny {
     case 'array': {
       const arrayValue = value as unknown[]
       if (arrayValue.length === 0) {
-        return z.array(z.unknown())
+        return z.array(z.string())
       }
 
       const firstKind = jsonType(arrayValue[0])
@@ -84,6 +76,8 @@ function buildSchemaFromJson(value: unknown): ZodTypeAny {
       if (uniform) {
         return z.array(buildSchemaFromJson(arrayValue[0]))
       }
+
+      // For mixed arrays, fallback to unknown for simplicity
 
       return z.array(z.unknown())
     }
@@ -107,9 +101,13 @@ class OpenAIProvider implements TranslationProviderAdapter {
   public readonly isFallback = false
 
   private readonly model: string
+  private readonly client: OpenAI
 
   constructor(private readonly config: ProviderConfig) {
     this.model = config.model && config.model.trim().length > 0 ? config.model : DEFAULT_OPENAI_MODEL
+    this.client = new OpenAI({
+      apiKey: config.apiKey
+    })
   }
 
   async translateMarkdown(job: MarkdownTranslationInput): Promise<string> {
@@ -120,7 +118,8 @@ class OpenAIProvider implements TranslationProviderAdapter {
       const text = await this.sendMarkdownRequest(prompt, job.content)
       return text.trim().length > 0 ? text : job.content
     } catch (error) {
-      return fallbackText(job.content, this.name, error)
+      console.error(`[translation] ${this.name} markdown translation failed:`, error)
+      throw error
     }
   }
 
@@ -128,92 +127,148 @@ class OpenAIProvider implements TranslationProviderAdapter {
     const prompt = `Translate the JSON values from ${localeName(job.sourceLocale)} (${job.sourceLocale}) to ${localeName(job.targetLocale)} (${job.targetLocale}). ` +
       'Do not change the keys or structure. Only return valid JSON with translated string values. Leave non-string values untouched.'
 
-    const schema = buildSchemaFromJson(job.data)
-
     try {
-      const response = await this.sendJsonRequest(prompt, job.data, schema)
-      const parsed = parseJsonResponse(response)
-      return schema.parse(parsed)
+      console.log('[translation] Data type:', jsonType(job.data))
+      
+      const response = await this.sendJsonRequest(prompt, job.data, null)
+      const parsed = parseJsonResponse(response) as { translation: unknown }
+      
+      // Validate the response has the same structure as input
+      if (jsonType(job.data) !== jsonType(parsed.translation)) {
+        console.warn('[translation] Response type mismatch, returning original data')
+        return cloneValue(job.data)
+      }
+      
+      return parsed.translation
     } catch (error) {
-      return fallbackJson(job.data, this.name, error)
+      console.error(`[translation] ${this.name} json translation failed:`, error)
+      throw error
     }
   }
 
   private async sendMarkdownRequest(instruction: string, content: string): Promise<string> {
-    const payload = {
-  model: this.model,
-      input: [
-        {
-          role: 'system',
-          content: 'You are a professional localization specialist.'
-        },
-        {
-          role: 'user',
-          content: `${instruction}\n\n---\n${content}\n---`
-        }
-      ]
-    }
+    try {
+      const response = await this.client.responses.create({
+        model: this.model,
+        input: [
+          {
+            role: 'system',
+            content: 'You are a professional localization specialist.'
+          },
+          {
+            role: 'user',
+            content: `${instruction}\n\n---\n${content}\n---`
+          }
+        ]
+      })
 
-    const response = await fetch(this.config.url, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${this.config.apiKey}`
-      },
-      body: JSON.stringify(payload)
-    })
-
-    if (!response.ok) {
-      const message = await response.text()
-      throw new Error(`OpenAI request failed (${response.status} ${response.statusText}): ${message}`)
+      const text = response.output_text
+      if (!text || typeof text !== 'string' || text.trim().length === 0) {
+        throw new Error('Empty response from OpenAI')
+      }
+      return text
+    } catch (error) {
+      if (error instanceof OpenAI.APIError) {
+        throw new Error(`OpenAI request failed (${error.status}): ${error.message}`)
+      }
+      throw error
     }
-
-    const data = await response.json()
-    const text = extractOpenAIText(data)
-    if (!text) {
-      throw new Error('Empty response from OpenAI')
-    }
-    return text
   }
 
-  private async sendJsonRequest(instruction: string, data: unknown, schema: ZodTypeAny): Promise<string> {
-    const payload = {
-      model: this.model,
-      input: [
-        {
-          role: 'system',
-          content: 'You are a professional localization specialist.'
+  private async sendJsonRequest(instruction: string, data: unknown, schema: ZodTypeAny | null): Promise<string> {
+    try {
+      // Create a proper JSON Schema manually to ensure it's correct
+      const jsonSchema = {
+        type: "object" as const,
+        properties: {
+          translation: this.buildJsonSchemaFromData(data)
         },
-        {
-          role: 'user',
-          content: `${instruction}\n\nInput JSON:\n${stringifyJson(data)}\n\nReturn only the translated JSON.`
-        }
-      ],
-      text: {
-        format: zodTextFormat(schema, 'translation')
+        required: ["translation"],
+        additionalProperties: false
       }
-    }
+      
+      console.log('[translation] Manual JSON schema:', JSON.stringify(jsonSchema, null, 2))
+      
+      const response = await this.client.responses.create({
+        model: this.model,
+        input: [
+          {
+            role: 'system',
+            content: 'You are a professional localization specialist.'
+          },
+          {
+            role: 'user',
+            content: `${instruction}\n\nInput JSON:\n${stringifyJson(data)}\n\nPlease return the translated JSON wrapped in an object with a "translation" key like this: {"translation": <your_translated_json>}`
+          }
+        ],
+        text: {
+          format: {
+            type: "json_schema",
+            name: "translation",
+            strict: true,
+            schema: jsonSchema
+          }
+        }
+      })
 
-    const response = await fetch(this.config.url, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${this.config.apiKey}`
-      },
-      body: JSON.stringify(payload)
-    })
-
-    if (!response.ok) {
-      const message = await response.text()
-      throw new Error(`OpenAI request failed (${response.status} ${response.statusText}): ${message}`)
+      const text = response.output_text
+      
+      if (!text || typeof text !== 'string' || text.trim().length === 0) {
+        throw new Error('Empty JSON response from OpenAI')
+      }
+      return text
+    } catch (error) {
+      if (error instanceof OpenAI.APIError) {
+        throw new Error(`OpenAI request failed (${error.status}): ${error.message}`)
+      }
+      throw error
     }
+  }
 
-    const dataResponse = await response.json()
-    const text = extractOpenAIText(dataResponse)
-    if (!text) {
-      throw new Error('Empty JSON response from OpenAI')
+  private buildJsonSchemaFromData(data: unknown): any {
+    const kind = jsonType(data)
+    
+    switch (kind) {
+      case 'string':
+        return { type: "string" }
+      case 'number':
+        return { type: "number" }
+      case 'boolean':
+        return { type: "boolean" }
+      case 'null':
+        return { type: "null" }
+      case 'array': {
+        const arrayValue = data as unknown[]
+        if (arrayValue.length === 0) {
+          return { type: "array", items: { type: "string" } }
+        }
+        
+        const firstItem = arrayValue[0]
+        return { 
+          type: "array", 
+          items: this.buildJsonSchemaFromData(firstItem)
+        }
+      }
+      case 'object': {
+        const obj = data as Record<string, unknown>
+        const properties: Record<string, any> = {}
+        const required: string[] = []
+        
+        for (const [key, value] of Object.entries(obj)) {
+          properties[key] = this.buildJsonSchemaFromData(value)
+          required.push(key)
+        }
+        
+        return {
+          type: "object",
+          properties,
+          required,
+          additionalProperties: false
+        }
+      }
+      default:
+        return { type: "string" }
     }
-    return text
   }
 }
 
@@ -222,9 +277,13 @@ class AnthropicProvider implements TranslationProviderAdapter {
   public readonly isFallback = false
 
   private readonly model: string
+  private readonly client: Anthropic
 
   constructor(private readonly config: ProviderConfig) {
     this.model = config.model && config.model.trim().length > 0 ? config.model : DEFAULT_ANTHROPIC_MODEL
+    this.client = new Anthropic({
+      apiKey: config.apiKey
+    })
   }
 
   async translateMarkdown(job: MarkdownTranslationInput): Promise<string> {
@@ -235,7 +294,8 @@ class AnthropicProvider implements TranslationProviderAdapter {
       const text = await this.sendMessage(prompt, job.content, false)
       return text.trim().length > 0 ? text : job.content
     } catch (error) {
-      return fallbackText(job.content, this.name, error)
+      console.error(`[translation] ${this.name} markdown translation failed:`, error)
+      throw error
     }
   }
 
@@ -247,20 +307,15 @@ class AnthropicProvider implements TranslationProviderAdapter {
       const text = await this.sendMessage(prompt, stringifyJson(job.data), true)
       return parseJsonResponse(text)
     } catch (error) {
-      return fallbackJson(job.data, this.name, error)
+      console.error(`[translation] ${this.name} json translation failed:`, error)
+      throw error
     }
   }
 
   private async sendMessage(instruction: string, content: string, expectJson: boolean): Promise<string> {
-    const response = await fetch(this.config.url, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': this.config.apiKey,
-        'anthropic-version': '2023-06-01'
-      },
-      body: JSON.stringify({
-  model: this.model,
+    try {
+      const message = await this.client.messages.create({
+        model: this.model,
         system: 'You are a professional localization specialist.',
         messages: [
           {
@@ -270,19 +325,22 @@ class AnthropicProvider implements TranslationProviderAdapter {
         ],
         max_tokens: 4096
       })
-    })
 
-    if (!response.ok) {
-      const message = await response.text()
-      throw new Error(`Anthropic request failed (${response.status} ${response.statusText}): ${message}`)
-    }
+      const text = message.content
+        .filter(block => block.type === 'text')
+        .map(block => block.text)
+        .join('\n')
 
-    const data = await response.json()
-    const text = extractAnthropicText(data)
-    if (!text) {
-      throw new Error('Empty response from Anthropic')
+      if (!text || text.trim().length === 0) {
+        throw new Error('Empty response from Anthropic')
+      }
+      return text
+    } catch (error) {
+      if (error instanceof Anthropic.APIError) {
+        throw new Error(`Anthropic request failed (${error.status}): ${error.message}`)
+      }
+      throw error
     }
-    return text
   }
 }
 
@@ -301,64 +359,7 @@ class NoOpTranslationProvider implements TranslationProviderAdapter {
   }
 }
 
-function extractOpenAIText(responseData: any): string | null {
-  if (!responseData) {
-    return null
-  }
 
-  if (Array.isArray(responseData.output_text) && responseData.output_text.length > 0) {
-    return responseData.output_text.join('').trim()
-  }
-
-  if (Array.isArray(responseData.output) && responseData.output.length > 0) {
-    const buffer = responseData.output
-      .map((item: any) => (item?.content ?? item?.text ?? ''))
-      .filter((value: string) => typeof value === 'string' && value.trim().length > 0)
-    if (buffer.length > 0) {
-      return buffer.join('\n').trim()
-    }
-  }
-
-  if (Array.isArray(responseData.content) && responseData.content.length > 0) {
-    const buffer = responseData.content
-      .map((item: any) => (item?.text ?? (Array.isArray(item?.content) ? item.content.map((inner: any) => inner?.text ?? '').join(' ') : '')))
-      .filter((value: string) => typeof value === 'string' && value.trim().length > 0)
-    if (buffer.length > 0) {
-      return buffer.join('\n').trim()
-    }
-  }
-
-  if (typeof responseData === 'string') {
-    return responseData.trim()
-  }
-
-  return null
-}
-
-function extractAnthropicText(responseData: any): string | null {
-  if (!responseData) {
-    return null
-  }
-
-  if (Array.isArray(responseData.content)) {
-    const buffer = responseData.content
-      .map((item: any) => (item?.text ?? ''))
-      .filter((value: string) => typeof value === 'string' && value.trim().length > 0)
-    if (buffer.length > 0) {
-      return buffer.join('\n').trim()
-    }
-  }
-
-  if (typeof responseData?.completion === 'string') {
-    return responseData.completion.trim()
-  }
-
-  if (typeof responseData === 'string') {
-    return responseData.trim()
-  }
-
-  return null
-}
 
 let cachedProvider: TranslationProviderAdapter | null = null
 

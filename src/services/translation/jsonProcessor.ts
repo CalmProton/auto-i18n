@@ -1,6 +1,7 @@
 import type { GlobalUploadRequest, PageUploadRequest, SavedFileInfo } from '../../types'
 import { SUPPORTED_LOCALES } from '../../config/locales'
 import { saveTextToTemp } from '../../utils/fileStorage'
+import { isJsonEmpty } from '../../utils/fileValidation'
 import { getTranslationProvider } from './providers'
 
 function getTargetLocales(sourceLocale: string): string[] {
@@ -51,6 +52,12 @@ export async function translateGlobalFile(request: GlobalUploadRequest): Promise
     return []
   }
 
+  // Check if the JSON is empty and skip translation if so
+  if (isJsonEmpty(parsed)) {
+    console.log(`[translation] Skipping empty global JSON file: ${request.file.name}`)
+    return []
+  }
+
   const translated: SavedFileInfo[] = []
 
   for (const targetLocale of targetLocales) {
@@ -78,7 +85,8 @@ export async function translateGlobalFile(request: GlobalUploadRequest): Promise
 
       translated.push(saved)
     } catch (error) {
-      console.error(`[translation] Failed to translate global file to ${targetLocale}:`, error)
+      console.error(`[translation] Failed to translate global file to ${targetLocale}. Stopping translation process for remaining locales.`, error)
+      break
     }
   }
 
@@ -106,10 +114,19 @@ export async function translatePageFiles(request: PageUploadRequest): Promise<Sa
   )
 
   const translated: SavedFileInfo[] = []
+  let translationFailed = false
 
   for (const targetLocale of targetLocales) {
+    if (translationFailed) break
+    
     for (const item of prepared) {
       if (!item.parsed || !ensureObjectOrArray(item.parsed, `page/${item.folder.folderName}/${item.folder.file.name}`)) {
+        continue
+      }
+
+      // Check if the JSON is empty and skip translation if so
+      if (isJsonEmpty(item.parsed)) {
+        console.log(`[translation] Skipping empty page JSON file: ${item.folder.folderName}/${item.folder.file.name}`)
         continue
       }
 
@@ -139,9 +156,11 @@ export async function translatePageFiles(request: PageUploadRequest): Promise<Sa
         translated.push(saved)
       } catch (error) {
         console.error(
-          `[translation] Failed to translate page folder "${item.folder.folderName}" to ${targetLocale}:`,
+          `[translation] Failed to translate page folder "${item.folder.folderName}" to ${targetLocale}. Stopping translation process for remaining locales.`,
           error
         )
+        translationFailed = true
+        break
       }
     }
   }

@@ -29,8 +29,11 @@ export async function translateContentFiles(request: ContentUploadRequest): Prom
   )
 
   const translatedFiles: SavedFileInfo[] = []
+  let translationFailed = false
 
   for (const targetLocale of targetLocales) {
+    if (translationFailed) break
+    
     for (const item of prepared) {
       try {
         const translated = await provider.translateMarkdown({
@@ -54,9 +57,11 @@ export async function translateContentFiles(request: ContentUploadRequest): Prom
         translatedFiles.push(saved)
       } catch (error) {
         console.error(
-          `[translation] Failed to translate content file "${item.relativePath}" to ${targetLocale}:`,
+          `[translation] Failed to translate content file "${item.relativePath}" to ${targetLocale}. Stopping translation process for remaining locales.`,
           error
         )
+        translationFailed = true
+        break
       }
     }
   }
