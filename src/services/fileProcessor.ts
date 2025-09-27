@@ -8,7 +8,7 @@ import type {
   PageUploadRequest,
   SavedFileInfo
 } from '../types'
-import { resolveUploadPath, saveFileToTemp, saveFilesToTemp } from '../utils/fileStorage'
+import { archiveExistingUploads, resolveUploadPath, saveFileToTemp, saveFilesToTemp } from '../utils/fileStorage'
 import { translateContentFiles } from './translation/contentProcessor'
 import { translateGlobalFile, translatePageFiles } from './translation/jsonProcessor'
 import { createScopedLogger } from '../utils/logger'
@@ -47,6 +47,15 @@ export async function processContentFiles(request: ContentUploadRequest): Promis
   })
   
   try {
+    const archivedPath = archiveExistingUploads({ senderId, locale, type: 'content', category: 'uploads' })
+    if (archivedPath) {
+      log.info('Archived previous content upload files', {
+        senderId,
+        locale,
+        archivedPath
+      })
+    }
+
     const savedFiles = await saveFilesToTemp(
       { senderId, locale, type: 'content', category: 'uploads' },
       files.map(({ file, folderPath }) => ({ file, folderName: folderPath }))
@@ -105,7 +114,16 @@ export async function processGlobalTranslation(request: GlobalUploadRequest): Pr
   })
   
   try {
-  const savedFile = await saveFileToTemp({ senderId, locale, type: 'global', file, category: 'uploads' })
+    const archivedPath = archiveExistingUploads({ senderId, locale, type: 'global', category: 'uploads' })
+    if (archivedPath) {
+      log.info('Archived previous global translation upload', {
+        senderId,
+        locale,
+        archivedPath
+      })
+    }
+
+    const savedFile = await saveFileToTemp({ senderId, locale, type: 'global', file, category: 'uploads' })
 
     const content = await file.text()
     log.info('Global translation file saved', {
@@ -171,6 +189,15 @@ export async function processPageTranslations(request: PageUploadRequest): Promi
   })
   
   try {
+    const archivedPath = archiveExistingUploads({ senderId, locale, type: 'page', category: 'uploads' })
+    if (archivedPath) {
+      log.info('Archived previous page translation uploads', {
+        senderId,
+        locale,
+        archivedPath
+      })
+    }
+
     const savedFiles: SavedFileInfo[] = await saveFilesToTemp(
       { senderId, locale, type: 'page', category: 'uploads' },
       folders.map(({ file, folderName }) => ({ file, folderName }))

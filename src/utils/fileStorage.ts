@@ -1,4 +1,4 @@
-import { mkdirSync, existsSync } from 'node:fs'
+import { mkdirSync, existsSync, readdirSync, renameSync } from 'node:fs'
 import { join, extname, basename } from 'node:path'
 import type { FileType, SavedFileInfo } from '../types'
 
@@ -84,6 +84,48 @@ export function resolveUploadPath(options: SavePathOptions): string {
 
 export function resolveTranslationPath(options: Omit<SavePathOptions, 'category'>): string {
   return resolveUploadPath({ ...options, category: 'translations' })
+}
+
+export function archiveExistingUploads(options: SavePathOptions): string | null {
+  const baseDir = resolveBaseDirectory(options)
+
+  if (!existsSync(baseDir)) {
+    return null
+  }
+
+  let entries: string[]
+  try {
+    entries = readdirSync(baseDir)
+  } catch {
+    return null
+  }
+
+  if (entries.length === 0) {
+    return null
+  }
+
+  const sanitizedSender = sanitizeSegment(options.senderId)
+  const sanitizedCategory = sanitizeSegment((options.category ?? DEFAULT_CATEGORY) as string)
+  const sanitizedLocale = sanitizeSegment(options.locale)
+  const sanitizedType = sanitizeSegment(options.type)
+  const timestamp = Date.now().toString()
+
+  const archiveRoot = join(tempRoot, sanitizedSender, sanitizedCategory, 'old', timestamp)
+  ensureDirectory(archiveRoot)
+  const archiveLocaleRoot = join(archiveRoot, sanitizedLocale)
+  ensureDirectory(archiveLocaleRoot)
+
+  let archiveTarget = join(archiveLocaleRoot, sanitizedType)
+  let counter = 1
+
+  while (existsSync(archiveTarget)) {
+    archiveTarget = join(archiveLocaleRoot, `${sanitizedType}-${counter}`)
+    counter += 1
+  }
+
+  renameSync(baseDir, archiveTarget)
+
+  return archiveTarget
 }
 
 function ensureUniqueFilePath(directory: string, originalName: string): string {
