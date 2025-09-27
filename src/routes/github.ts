@@ -1,6 +1,6 @@
 import { Hono } from 'hono'
 import { finalizeTranslationJob } from '../services/github/workflow'
-import type { ErrorResponse } from '../types'
+import type { ErrorResponse, TranslationMetadataUpdate } from '../types'
 import { createScopedLogger } from '../utils/logger'
 
 const githubRoutes = new Hono()
@@ -20,16 +20,18 @@ githubRoutes.post('/finalize', async (c) => {
       return c.json(errorResponse, 400)
     }
 
-    const metadata = isRecord(body.metadata) ? body.metadata : undefined
+    const metadataUpdate = isRecord(body.metadata) ? body.metadata as TranslationMetadataUpdate : undefined
+    const jobId = typeof body.jobId === 'string' ? body.jobId : undefined
     const dryRun = body.dryRun === true
 
     log.info('Received finalize request', {
       senderId,
       dryRun,
-      metadataProvided: Boolean(metadata)
+      metadataProvided: Boolean(metadataUpdate),
+      jobId
     })
 
-    const result = await finalizeTranslationJob({ senderId, metadata: metadata as any, dryRun })
+    const result = await finalizeTranslationJob({ senderId, metadataUpdate, jobId, dryRun })
 
     return c.json({
       message: 'GitHub synchronization complete',

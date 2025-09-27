@@ -4,6 +4,8 @@ import { extractLocale, extractSenderId, parsePageUpload } from '../utils/fileVa
 import type { FileUploadResponse, ErrorResponse } from '../types'
 import { isSupportedLocale } from '../config/locales'
 import { createScopedLogger } from '../utils/logger'
+import { extractMetadataUpdate } from '../utils/metadataInput'
+import { updateMetadata } from '../utils/jobMetadata'
 
 const pageTranslationRoutes = new Hono()
 const log = createScopedLogger('routes:page')
@@ -55,6 +57,32 @@ pageTranslationRoutes.post('/', async (c) => {
       return c.json(errorResponse, 400)
     }
     
+    const metadataRaw = body.metadata ?? c.req.query('metadata')
+    const jobId = typeof body.jobId === 'string' ? body.jobId.trim() : 'page'
+
+    const metadataResult = extractMetadataUpdate({
+      rawMetadata: metadataRaw,
+      defaultJobId: jobId || 'page',
+      jobType: 'page',
+      sourceLocale: pageRequest.locale,
+      actualFiles: pageRequest.folders.map(({ folderName }) => ({
+        sourceTempRelativePath: folderName ? `${folderName}/${pageRequest.locale}.json` : `${pageRequest.locale}.json`,
+        label: folderName || undefined
+      }))
+    })
+
+    if ('error' in metadataResult) {
+      const errorResponse: ErrorResponse = {
+        error: metadataResult.error
+      }
+      log.warn('Page metadata extraction failed', {
+        senderId,
+        locale,
+        reason: metadataResult.error
+      })
+      return c.json(errorResponse, 400)
+    }
+
     // Process the files
     log.info('Processing page translation upload', {
       senderId: pageRequest.senderId,
@@ -77,6 +105,20 @@ pageTranslationRoutes.post('/', async (c) => {
       return c.json(errorResponse, 500)
     }
     
+    try {
+      await updateMetadata(senderId, metadataResult.update)
+    } catch (error) {
+      log.error('Failed to persist metadata for page upload', {
+        senderId,
+        locale,
+        error
+      })
+      const errorResponse: ErrorResponse = {
+        error: 'Failed to persist metadata for page upload'
+      }
+      return c.json(errorResponse, 500)
+    }
+
     const response: FileUploadResponse = {
       message: result.message,
       senderId: result.senderId,

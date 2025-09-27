@@ -64,32 +64,63 @@ export interface TranslationFileDescriptor {
   label?: string
 }
 
+export interface TranslationRepositoryMetadata {
+  owner: string
+  name: string
+  baseBranch: string
+  baseCommitSha: string
+}
+
+export interface TranslationIssueMetadata {
+  title?: string
+  body?: string
+}
+
+export interface TranslationPullRequestMetadata {
+  title?: string
+  body?: string
+  baseBranch?: string
+}
+
+export interface TranslationBranchMetadata {
+  name?: string
+  prefix?: string
+}
+
 export interface TranslationJobMetadata {
-  senderId: string
-  repository: {
-    owner: string
-    name: string
-    baseBranch: string
-    baseCommitSha: string
-  }
-  sourceLocale: string
-  targetLocales?: string[]
+  id: string
+  type?: string
   files: TranslationFileDescriptor[]
-  issue?: {
-    title?: string
-    body?: string
-  }
-  pullRequest?: {
-    title?: string
-    body?: string
-    baseBranch?: string
-  }
-  branch?: {
-    name?: string
-    prefix?: string
-  }
+  sourceLocale?: string
+  targetLocales?: string[]
+  issue?: TranslationIssueMetadata
+  pullRequest?: TranslationPullRequestMetadata
+  branch?: TranslationBranchMetadata
+  createdAt?: string
+  updatedAt?: string
+}
+
+export interface TranslationMetadataFile {
+  senderId: string
+  repository?: TranslationRepositoryMetadata
+  sourceLocale?: string
+  targetLocales?: string[]
+  issue?: TranslationIssueMetadata
+  pullRequest?: TranslationPullRequestMetadata
+  branch?: TranslationBranchMetadata
+  jobs: TranslationJobMetadata[]
   createdAt: string
   updatedAt: string
+}
+
+export interface TranslationMetadataUpdate {
+  repository?: TranslationRepositoryMetadata
+  sourceLocale?: string
+  targetLocales?: string[]
+  issue?: TranslationIssueMetadata
+  pullRequest?: TranslationPullRequestMetadata
+  branch?: TranslationBranchMetadata
+  jobs?: TranslationJobMetadata[]
 }
 
 interface BaseUploadRequest {

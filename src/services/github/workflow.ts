@@ -1,17 +1,27 @@
 import { readFile } from 'node:fs/promises'
 import { existsSync, readdirSync } from 'node:fs'
 import { join as pathJoin, posix as pathPosix } from 'node:path'
-import type { TranslationFileDescriptor, TranslationJobMetadata } from '../../types'
+import type {
+  TranslationFileDescriptor,
+  TranslationJobMetadata,
+  TranslationMetadataFile,
+  TranslationMetadataUpdate,
+  TranslationIssueMetadata,
+  TranslationPullRequestMetadata,
+  TranslationRepositoryMetadata,
+  TranslationBranchMetadata
+} from '../../types'
 import { GitHubClient, type GitCommit } from './client'
 import { createScopedLogger } from '../../utils/logger'
-import { loadJobMetadata, saveJobMetadata } from '../../utils/jobMetadata'
+import { loadMetadata, updateMetadata } from '../../utils/jobMetadata'
 import { tempRoot } from '../../utils/fileStorage'
 
 const log = createScopedLogger('services:github:workflow')
 
 export interface FinalizeTranslationJobOptions {
   senderId: string
-  metadata?: Partial<TranslationJobMetadata>
+  jobId?: string
+  metadataUpdate?: TranslationMetadataUpdate
   dryRun?: boolean
 }
 
@@ -28,9 +38,14 @@ export interface FinalizeTranslationJobResult {
 }
 
 interface PreparedJob {
-  metadata: TranslationJobMetadata
+  metadata: TranslationMetadataFile
+  job: TranslationJobMetadata
+  repository: TranslationRepositoryMetadata
+  sourceLocale: string
   targetLocales: string[]
   branchName: string
+  issue?: TranslationIssueMetadata
+  pullRequest?: TranslationPullRequestMetadata
 }
 
 function sanitizeSegment(segment: string): string {
@@ -145,71 +160,108 @@ async function readTempFile(path: string): Promise<string | null> {
 }
 
 async function prepareJob(options: FinalizeTranslationJobOptions): Promise<PreparedJob> {
-  const existingMetadata = await loadJobMetadata(options.senderId)
-  const merged: TranslationJobMetadata | null = existingMetadata
-    ? { ...existingMetadata, ...options.metadata, updatedAt: existingMetadata.updatedAt }
-    : null
+  let metadata: TranslationMetadataFile | null = await loadMetadata(options.senderId)
 
-  const metadata = merged ?? (() => {
-    if (!options.metadata) {
-      throw new Error('Job metadata not found. Provide metadata payload to finalize translation job.')
-    }
-
-    const now = new Date().toISOString()
-    return {
-      senderId: options.senderId,
-      createdAt: now,
-      updatedAt: now,
-      files: options.metadata.files ?? [],
-      repository: options.metadata.repository ?? (() => { throw new Error('Missing repository information in metadata.') })(),
-      sourceLocale: options.metadata.sourceLocale ?? (() => { throw new Error('Missing source locale in metadata.') })(),
-      targetLocales: options.metadata.targetLocales,
-      issue: options.metadata.issue,
-      pullRequest: options.metadata.pullRequest,
-      branch: options.metadata.branch
-    }
-  })()
-
-  if (!metadata.files || metadata.files.length === 0) {
-    throw new Error('Translation job metadata has no file descriptors.')
+  if (!metadata) {
+    throw new Error('No metadata.json found for this sender. Upload files with metadata before finalizing.')
   }
 
-  if (!metadata.repository?.owner || !metadata.repository?.name) {
-    throw new Error('Translation job metadata is missing repository owner/name.')
+  if (options.metadataUpdate) {
+    metadata = await updateMetadata(options.senderId, options.metadataUpdate)
   }
 
-  if (!metadata.repository.baseBranch) {
-    throw new Error('Translation job metadata is missing base branch.')
+  if (!metadata.jobs || metadata.jobs.length === 0) {
+    throw new Error('No translation jobs recorded in metadata.json.')
   }
 
-  if (!metadata.repository.baseCommitSha) {
-    throw new Error('Translation job metadata is missing base commit SHA.')
+  let desiredJobId = options.jobId
+  if (!desiredJobId && options.metadataUpdate?.jobs && options.metadataUpdate.jobs.length > 0) {
+    desiredJobId = options.metadataUpdate.jobs[0].id
   }
 
-  if (!metadata.sourceLocale) {
-    throw new Error('Translation job metadata is missing source locale.')
+  let job = desiredJobId
+    ? metadata.jobs.find((entry) => entry.id === desiredJobId)
+    : metadata.jobs[0]
+
+  if (!job) {
+    throw new Error(`Unable to find job metadata for id "${desiredJobId}"`)
   }
 
-  const detectedLocales = collectLocalesFromTranslations(options.senderId)
-  const targetLocales = (metadata.targetLocales && metadata.targetLocales.length > 0)
-    ? metadata.targetLocales
-    : detectedLocales
-
-  if (targetLocales.length === 0) {
-    throw new Error('No target locales found for translation job.')
+  if (!job.files || job.files.length === 0) {
+    throw new Error(`Job "${job.id}" does not contain any file descriptors.`)
   }
 
-  const branchName = metadata.branch?.name
-    || `${metadata.branch?.prefix ?? 'auto-i18n'}/${sanitizeSegment(options.senderId)}/${Date.now().toString(36)}`
+  const repository: TranslationRepositoryMetadata | undefined = metadata.repository
+  if (!repository || !repository.owner || !repository.name || !repository.baseBranch || !repository.baseCommitSha) {
+    throw new Error('Repository information is missing from metadata.json.')
+  }
 
-  await saveJobMetadata({
-    ...metadata,
-    branch: { ...metadata.branch, name: branchName },
-    targetLocales,
-    updatedAt: metadata.updatedAt ?? new Date().toISOString()
+  const sourceLocale = job.sourceLocale ?? metadata.sourceLocale
+  if (!sourceLocale) {
+    throw new Error('Source locale is missing from metadata.json.')
+  }
+
+  let targetLocales = job.targetLocales ?? metadata.targetLocales
+  if (!targetLocales || targetLocales.length === 0) {
+    targetLocales = collectLocalesFromTranslations(options.senderId)
+  }
+
+  if (!targetLocales || targetLocales.length === 0) {
+    throw new Error('No target locales available for translation job.')
+  }
+
+  // ensure uniqueness and stable order
+  const uniqueTargets = Array.from(new Set(targetLocales))
+
+  const branchSource: TranslationBranchMetadata = {
+    prefix: job.branch?.prefix ?? metadata.branch?.prefix,
+    name: job.branch?.name ?? metadata.branch?.name
+  }
+
+  const branchName = branchSource.name
+    ?? `${branchSource.prefix ?? 'auto-i18n'}/${sanitizeSegment(options.senderId)}/${Date.now().toString(36)}`
+
+  const resolvedBranch: TranslationBranchMetadata = {
+    prefix: branchSource.prefix,
+    name: branchName
+  }
+
+  const issue: TranslationIssueMetadata | undefined = job.issue ?? metadata.issue
+  const pullRequest: TranslationPullRequestMetadata | undefined = job.pullRequest ?? metadata.pullRequest
+
+  metadata = await updateMetadata(options.senderId, {
+    repository,
+    sourceLocale,
+    targetLocales: metadata.targetLocales ?? uniqueTargets,
+    branch: resolvedBranch,
+    jobs: [
+      {
+        id: job.id,
+        branch: resolvedBranch,
+        files: job.files,
+        sourceLocale,
+        targetLocales: job.targetLocales ?? uniqueTargets,
+        issue: job.issue,
+        pullRequest: job.pullRequest
+      }
+    ]
   })
 
-  return { metadata: { ...metadata, branch: { ...metadata.branch, name: branchName }, targetLocales }, targetLocales, branchName }
+  const refreshedJob = metadata.jobs.find((entry) => entry.id === job.id)
+  if (!refreshedJob || !refreshedJob.files || refreshedJob.files.length === 0) {
+    throw new Error('Failed to persist job metadata updates.')
+  }
+
+  return {
+    metadata,
+    job: refreshedJob,
+    repository,
+    sourceLocale,
+    targetLocales: uniqueTargets,
+    branchName,
+    issue,
+    pullRequest
+  }
 }
 
 async function createCommitFromFiles(
@@ -253,11 +305,20 @@ async function createCommitFromFiles(
 export async function finalizeTranslationJob(
   options: FinalizeTranslationJobOptions
 ): Promise<FinalizeTranslationJobResult> {
-  const { metadata, targetLocales, branchName } = await prepareJob(options)
+  const prepared = await prepareJob(options)
+  const {
+    metadata,
+    job,
+    repository,
+    sourceLocale,
+    targetLocales,
+    branchName,
+    issue: issueMetadata,
+    pullRequest: pullRequestMetadata
+  } = prepared
 
   const client = new GitHubClient()
-  const { owner, name: repo, baseBranch, baseCommitSha } = metadata.repository
-  const sourceLocale = metadata.sourceLocale
+  const { owner, name: repo, baseBranch, baseCommitSha } = repository
 
   log.info('Starting translation job finalization', {
     senderId: options.senderId,
@@ -273,20 +334,20 @@ export async function finalizeTranslationJob(
     await client.createRef(owner, repo, `heads/${branchName}`, baseCommitSha)
   }
 
-  const issueTitle = metadata.issue?.title
+  const issueTitle = issueMetadata?.title
     ?? `Translate ${sourceLocale} resources to ${targetLocales.join(', ')}`
-  const issueBody = metadata.issue?.body
+  const issueBody = issueMetadata?.body
     ?? `Automated translation request for locales: ${targetLocales.join(', ')}.`
 
   const issue = options.dryRun
-    ? { number: 0 }
+    ? { number: 0, url: '', html_url: '', title: issueTitle }
     : await client.createIssue({ owner, repo, title: issueTitle, body: issueBody })
 
   const seededFiles: Array<{ path: string; content: string }> = []
-  for (const descriptor of metadata.files) {
+  for (const descriptor of job.files) {
     const sourcePath = resolveTempFilePath(options.senderId, [
       'uploads',
-      metadata.sourceLocale,
+      sourceLocale,
       descriptor.type,
       descriptor.sourceTempRelativePath
     ])
@@ -297,10 +358,10 @@ export async function finalizeTranslationJob(
     }
 
     for (const locale of targetLocales) {
-      if (locale === metadata.sourceLocale) {
+      if (locale === sourceLocale) {
         continue
       }
-      const targetRepoPath = deriveTargetRepoPath(descriptor, locale, metadata.sourceLocale)
+      const targetRepoPath = deriveTargetRepoPath(descriptor, locale, sourceLocale)
       seededFiles.push({ path: targetRepoPath, content: sourceContent })
     }
   }
@@ -313,7 +374,7 @@ export async function finalizeTranslationJob(
     baseCommit.tree.sha,
     baseCommit.sha,
     seededFiles,
-    `chore(i18n): seed ${targetLocales.join(', ')} from ${metadata.sourceLocale}`
+    `chore(i18n): seed ${targetLocales.join(', ')} from ${sourceLocale}`
   )
 
   let currentCommitSha = firstCommit?.sha ?? baseCommit.sha
@@ -324,12 +385,12 @@ export async function finalizeTranslationJob(
   }
 
   const translatedFiles: Array<{ path: string; content: string }> = []
-  for (const descriptor of metadata.files) {
+  for (const descriptor of job.files) {
     for (const locale of targetLocales) {
-      if (locale === metadata.sourceLocale) {
+      if (locale === sourceLocale) {
         continue
       }
-      const translationRelative = deriveTranslationTempRelativePath(descriptor, locale, metadata.sourceLocale)
+      const translationRelative = deriveTranslationTempRelativePath(descriptor, locale, sourceLocale)
       const translationPath = resolveTempFilePath(options.senderId, [
         'translations',
         locale,
@@ -340,7 +401,7 @@ export async function finalizeTranslationJob(
       if (!translationContent) {
         continue
       }
-      const targetRepoPath = deriveTargetRepoPath(descriptor, locale, metadata.sourceLocale)
+      const targetRepoPath = deriveTargetRepoPath(descriptor, locale, sourceLocale)
       translatedFiles.push({ path: targetRepoPath, content: translationContent })
     }
   }
@@ -370,15 +431,15 @@ export async function finalizeTranslationJob(
     throw new Error('No file changes were produced for this translation job. Aborting pull request creation.')
   }
 
-  const prTitle = metadata.pullRequest?.title
+  const prTitle = pullRequestMetadata?.title
     ?? `Translate ${sourceLocale} ➜ ${targetLocales.join(', ')}`
-  const prBody = metadata.pullRequest?.body
-    ?? `## Summary\n\n- seed locale files for ${targetLocales.join(', ')}\n- apply automated translations\n\nCloses #${issue.number}`
+  const prBody = pullRequestMetadata?.body
+    ?? `## Summary\n\n- seed locale files for ${targetLocales.join(', ')}\n- apply automated translations${issue.number > 0 ? `\n\nCloses #${issue.number}` : ''}`
 
-  const prBase = metadata.pullRequest?.baseBranch ?? baseBranch
+  const prBase = pullRequestMetadata?.baseBranch ?? baseBranch
 
   const pullRequest = options.dryRun
-    ? { number: 0, html_url: '', head: { ref: branchName }, base: { ref: prBase } }
+    ? { number: 0, url: '', html_url: '', head: { ref: branchName }, base: { ref: prBase } }
     : await client.createPullRequest({ owner, repo, title: prTitle, head: branchName, base: prBase, body: prBody })
 
   log.info('Translation finalization completed', {
@@ -393,8 +454,8 @@ export async function finalizeTranslationJob(
     senderId: options.senderId,
     branchName,
     baseCommitSha,
-    seededLocales: targetLocales.filter((locale) => locale !== metadata.sourceLocale),
-    translatedLocales: translatedFiles.length > 0 ? targetLocales.filter((locale) => locale !== metadata.sourceLocale) : [],
+  seededLocales: targetLocales.filter((locale) => locale !== sourceLocale),
+  translatedLocales: translatedFiles.length > 0 ? targetLocales.filter((locale) => locale !== sourceLocale) : [],
     issueNumber: issue.number,
     pullRequestNumber: pullRequest.number,
     pullRequestUrl: pullRequest.html_url ?? '',

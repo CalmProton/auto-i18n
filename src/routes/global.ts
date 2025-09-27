@@ -4,6 +4,8 @@ import { extractLocale, extractSenderId, parseGlobalUpload } from '../utils/file
 import type { FileUploadResponse, ErrorResponse } from '../types'
 import { isSupportedLocale } from '../config/locales'
 import { createScopedLogger } from '../utils/logger'
+import { extractMetadataUpdate } from '../utils/metadataInput'
+import { updateMetadata } from '../utils/jobMetadata'
 
 const globalTranslationRoutes = new Hono()
 const log = createScopedLogger('routes:global')
@@ -55,6 +57,36 @@ globalTranslationRoutes.post('/', async (c) => {
       return c.json(errorResponse, 400)
     }
     
+    const metadataRaw = body.metadata ?? c.req.query('metadata')
+    const fallbackRepoPath = typeof body.repositorySourcePath === 'string' ? body.repositorySourcePath.trim() : undefined
+    const jobId = typeof body.jobId === 'string' ? body.jobId.trim() : 'global'
+
+    const metadataResult = extractMetadataUpdate({
+      rawMetadata: metadataRaw,
+      fallbackRepositorySourcePath: fallbackRepoPath,
+      defaultJobId: jobId || 'global',
+      jobType: 'global',
+      sourceLocale: globalRequest.locale,
+      actualFiles: [
+        {
+          sourceTempRelativePath: globalRequest.file.name,
+          repositorySourcePath: fallbackRepoPath
+        }
+      ]
+    })
+
+    if ('error' in metadataResult) {
+      const errorResponse: ErrorResponse = {
+        error: metadataResult.error
+      }
+      log.warn('Global metadata extraction failed', {
+        senderId,
+        locale,
+        reason: metadataResult.error
+      })
+      return c.json(errorResponse, 400)
+    }
+
     // Process the file
     log.info('Processing global translation upload', {
       senderId: globalRequest.senderId,
@@ -77,6 +109,20 @@ globalTranslationRoutes.post('/', async (c) => {
       return c.json(errorResponse, 500)
     }
     
+    try {
+      await updateMetadata(senderId, metadataResult.update)
+    } catch (error) {
+      log.error('Failed to persist metadata for global upload', {
+        senderId,
+        locale,
+        error
+      })
+      const errorResponse: ErrorResponse = {
+        error: 'Failed to persist metadata for global upload'
+      }
+      return c.json(errorResponse, 500)
+    }
+
     const response: FileUploadResponse = {
       message: result.message,
       senderId: result.senderId,
