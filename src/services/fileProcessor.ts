@@ -41,7 +41,7 @@ export async function processContentFiles(request: ContentUploadRequest): Promis
   
   try {
     const savedFiles = await saveFilesToTemp(
-      { senderId, locale, type: 'content' },
+      { senderId, locale, type: 'content', category: 'uploads' },
       files.map(({ file, folderPath }) => ({ file, folderName: folderPath }))
     )
 
@@ -85,7 +85,7 @@ export async function processGlobalTranslation(request: GlobalUploadRequest): Pr
   console.log(`Processing global translation file: ${file.name} for locale: ${locale} (sender: ${senderId})`)
   
   try {
-  const savedFile = await saveFileToTemp({ senderId, locale, type: 'global', file })
+  const savedFile = await saveFileToTemp({ senderId, locale, type: 'global', file, category: 'uploads' })
 
     const content = await file.text()
     console.log(`- Global translation content length: ${content.length} characters`)
@@ -129,7 +129,7 @@ export async function processPageTranslations(request: PageUploadRequest): Promi
   
   try {
     const savedFiles: SavedFileInfo[] = await saveFilesToTemp(
-      { senderId, locale, type: 'page' },
+      { senderId, locale, type: 'page', category: 'uploads' },
       folders.map(({ file, folderName }) => ({ file, folderName }))
     )
     const translatedFiles: SavedFileInfo[] = []
@@ -202,7 +202,7 @@ export async function triggerContentTranslation(options: {
   locale: string
 }): Promise<ProcessingResult> {
   const { senderId, locale } = options
-  const rootDir = resolveUploadPath({ senderId, locale, type: 'content' })
+  const rootDir = resolveUploadPath({ senderId, locale, type: 'content', category: 'uploads' })
 
   if (!existsSync(rootDir)) {
     return {
@@ -341,7 +341,7 @@ export async function triggerPageTranslation(options: {
   locale: string
 }): Promise<ProcessingResult> {
   const { senderId, locale } = options
-  const rootDir = resolveUploadPath({ senderId, locale, type: 'page' })
+  const rootDir = resolveUploadPath({ senderId, locale, type: 'page', category: 'uploads' })
 
   if (!existsSync(rootDir)) {
     return {
@@ -429,7 +429,7 @@ export async function triggerGlobalTranslation(options: {
   locale: string
 }): Promise<ProcessingResult> {
   const { senderId, locale } = options
-  const directory = resolveUploadPath({ senderId, locale, type: 'global' })
+  const directory = resolveUploadPath({ senderId, locale, type: 'global', category: 'uploads' })
 
   if (!existsSync(directory)) {
     return {

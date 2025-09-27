@@ -1,3 +1,5 @@
+import { z, type ZodTypeAny } from 'zod'
+import { zodTextFormat } from 'openai/helpers/zod'
 import { getTranslationConfig, type ProviderConfig } from '../../config/env'
 import { SUPPORTED_LOCALES } from '../../config/locales'
 import type {
@@ -49,6 +51,57 @@ function localeName(code: string): string {
   return SUPPORTED_LOCALES.find((item) => item.code === code)?.name ?? code
 }
 
+function jsonType(value: unknown): string {
+  if (value === null) {
+    return 'null'
+  }
+  if (Array.isArray(value)) {
+    return 'array'
+  }
+  return typeof value
+}
+
+function buildSchemaFromJson(value: unknown): ZodTypeAny {
+  const kind = jsonType(value)
+
+  switch (kind) {
+    case 'string':
+      return z.string()
+    case 'number':
+      return z.number()
+    case 'boolean':
+      return z.boolean()
+    case 'null':
+      return z.null()
+    case 'array': {
+      const arrayValue = value as unknown[]
+      if (arrayValue.length === 0) {
+        return z.array(z.unknown())
+      }
+
+      const firstKind = jsonType(arrayValue[0])
+      const uniform = arrayValue.every((item) => jsonType(item) === firstKind)
+      if (uniform) {
+        return z.array(buildSchemaFromJson(arrayValue[0]))
+      }
+
+      return z.array(z.unknown())
+    }
+    case 'object': {
+      const entries = Object.entries(value as Record<string, unknown>)
+      const shape: Record<string, ZodTypeAny> = {}
+
+      for (const [key, entryValue] of entries) {
+        shape[key] = buildSchemaFromJson(entryValue)
+      }
+
+      return z.object(shape).passthrough()
+    }
+    default:
+      return z.unknown()
+  }
+}
+
 class OpenAIProvider implements TranslationProviderAdapter {
   public readonly name = 'openai' as const
   public readonly isFallback = false
@@ -75,9 +128,12 @@ class OpenAIProvider implements TranslationProviderAdapter {
     const prompt = `Translate the JSON values from ${localeName(job.sourceLocale)} (${job.sourceLocale}) to ${localeName(job.targetLocale)} (${job.targetLocale}). ` +
       'Do not change the keys or structure. Only return valid JSON with translated string values. Leave non-string values untouched.'
 
+    const schema = buildSchemaFromJson(job.data)
+
     try {
-      const response = await this.sendJsonRequest(prompt, job.data)
-      return parseJsonResponse(response)
+      const response = await this.sendJsonRequest(prompt, job.data, schema)
+      const parsed = parseJsonResponse(response)
+      return schema.parse(parsed)
     } catch (error) {
       return fallbackJson(job.data, this.name, error)
     }
@@ -120,9 +176,9 @@ class OpenAIProvider implements TranslationProviderAdapter {
     return text
   }
 
-  private async sendJsonRequest(instruction: string, data: unknown): Promise<string> {
+  private async sendJsonRequest(instruction: string, data: unknown, schema: ZodTypeAny): Promise<string> {
     const payload = {
-  model: this.model,
+      model: this.model,
       input: [
         {
           role: 'system',
@@ -133,7 +189,9 @@ class OpenAIProvider implements TranslationProviderAdapter {
           content: `${instruction}\n\nInput JSON:\n${stringifyJson(data)}\n\nReturn only the translated JSON.`
         }
       ],
-      response_format: { type: 'json_object' }
+      text: {
+        format: zodTextFormat(schema, 'translation')
+      }
     }
 
     const response = await fetch(this.config.url, {

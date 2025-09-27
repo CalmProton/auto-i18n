@@ -2,20 +2,25 @@ import { mkdirSync, existsSync } from 'node:fs'
 import { join, extname, basename } from 'node:path'
 import type { FileType, SavedFileInfo } from '../types'
 
+export type StorageCategory = 'uploads' | 'translations'
+
 export type SavePathOptions = {
   senderId: string
   locale: string
   type: FileType
   folderName?: string
+  category?: StorageCategory
 }
 
 type SaveFileOptions = SavePathOptions & {
   file: File
 }
 
-const DEFAULT_TEMP_ROOT = join(process.cwd(), 'tmp', 'uploads')
+const DEFAULT_TEMP_ROOT = join(process.cwd(), 'tmp')
 
 export const tempRoot = process.env.AUTO_I18N_TEMP_DIR ?? DEFAULT_TEMP_ROOT
+
+const DEFAULT_CATEGORY: StorageCategory = 'uploads'
 
 function sanitizeSegment(segment: string): string {
   return segment.replace(/[^a-zA-Z0-9._-]/g, '_')
@@ -27,8 +32,20 @@ function ensureDirectory(path: string) {
   }
 }
 
-function buildDirectory({ senderId, locale, type, folderName }: SavePathOptions): string {
-  const baseDir = join(tempRoot, sanitizeSegment(senderId), sanitizeSegment(locale), type)
+function resolveBaseDirectory({ senderId, locale, type, category }: SavePathOptions): string {
+  const sanitizedCategory = sanitizeSegment((category ?? DEFAULT_CATEGORY) as string)
+  return join(
+    tempRoot,
+    sanitizeSegment(senderId),
+    sanitizedCategory,
+    sanitizeSegment(locale),
+    sanitizeSegment(type)
+  )
+}
+
+function buildDirectory(options: SavePathOptions): string {
+  const { folderName } = options
+  const baseDir = resolveBaseDirectory(options)
   ensureDirectory(baseDir)
 
   if (!folderName) {
@@ -49,19 +66,24 @@ function buildDirectory({ senderId, locale, type, folderName }: SavePathOptions)
   return targetDir
 }
 
-export function resolveUploadPath({ senderId, locale, type, folderName }: SavePathOptions): string {
-  const baseDir = join(tempRoot, sanitizeSegment(senderId), sanitizeSegment(locale), type)
+export function resolveUploadPath(options: SavePathOptions): string {
+  const { folderName } = options
+  const baseDir = resolveBaseDirectory(options)
 
   if (!folderName) {
     return baseDir
   }
 
-  const folderSegments = folderName
+  const folderSegments = (folderName ?? '')
     .split(/[\\/]/)
     .map((segment) => sanitizeSegment(segment))
     .filter((segment) => segment.length > 0)
 
   return folderSegments.reduce((dir, segment) => join(dir, segment), baseDir)
+}
+
+export function resolveTranslationPath(options: Omit<SavePathOptions, 'category'>): string {
+  return resolveUploadPath({ ...options, category: 'translations' })
 }
 
 function ensureUniqueFilePath(directory: string, originalName: string): string {

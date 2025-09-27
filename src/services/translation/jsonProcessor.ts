@@ -71,6 +71,7 @@ export async function translateGlobalFile(request: GlobalUploadRequest): Promise
         senderId: request.senderId,
         locale: targetLocale,
         type: 'global',
+        category: 'translations',
         filename: buildJsonFilename(targetLocale),
         content: serializeJson(result)
       })
@@ -129,6 +130,7 @@ export async function translatePageFiles(request: PageUploadRequest): Promise<Sa
           senderId: request.senderId,
           locale: targetLocale,
           type: 'page',
+          category: 'translations',
           folderName: item.folder.folderName,
           filename: buildJsonFilename(targetLocale),
           content: serializeJson(result)

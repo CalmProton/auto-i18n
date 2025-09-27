@@ -45,6 +45,7 @@ export async function translateContentFiles(request: ContentUploadRequest): Prom
           senderId: request.senderId,
           locale: targetLocale,
           type: 'content',
+          category: 'translations',
           folderName: item.entry.folderPath,
           filename: item.entry.file.name,
           content: translated

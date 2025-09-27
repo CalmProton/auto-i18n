@@ -1,3 +1,6 @@
+import { existsSync, readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
+
 export type TranslationProvider = 'openai' | 'anthropic'
 
 export type ProviderConfig = {
@@ -12,6 +15,72 @@ type TranslationConfig = {
   providers: Partial<Record<TranslationProvider, ProviderConfig>>
 }
 
+let envLoaded = false
+
+function ensureEnvLoaded(): void {
+  if (envLoaded) {
+    return
+  }
+
+  envLoaded = true
+
+  if (typeof Bun !== 'undefined') {
+    // Bun automatically loads `.env` files into Bun.env
+    return
+  }
+
+  if (typeof process === 'undefined' || typeof process.cwd !== 'function') {
+    return
+  }
+
+  try {
+    const envPath = resolve(process.cwd(), '.env')
+    if (!existsSync(envPath)) {
+      return
+    }
+
+    const content = readFileSync(envPath, 'utf8')
+    const lines = content.split(/\r?\n/)
+
+    for (const rawLine of lines) {
+      const line = rawLine.trim()
+      if (!line || line.startsWith('#')) {
+        continue
+      }
+
+      const [rawKey, ...rawValueParts] = line.split('=')
+      if (!rawKey || rawValueParts.length === 0) {
+        continue
+      }
+
+      const key = rawKey.replace(/^export\s+/i, '').trim()
+      if (!key || key in process.env) {
+        continue
+      }
+
+      let value = rawValueParts.join('=').trim()
+
+      const isQuoted = (value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))
+      if (isQuoted) {
+        value = value.slice(1, -1)
+      }
+
+      if (!isQuoted) {
+        const hashIndex = value.indexOf(' #')
+        if (hashIndex >= 0) {
+          value = value.slice(0, hashIndex).trim()
+        }
+      }
+
+      value = value.replace(/\\n/g, '\n').replace(/\\r/g, '\r')
+
+      process.env[key] = value
+    }
+  } catch (error) {
+    console.warn('[env] Unable to automatically load .env file in Node runtime.', error)
+  }
+}
+
 function toTranslationProvider(value: string | undefined): TranslationProvider {
   const normalized = (value ?? '').trim().toLowerCase()
   if (normalized === 'anthropic') {
@@ -21,6 +90,7 @@ function toTranslationProvider(value: string | undefined): TranslationProvider {
 }
 
 function readEnv(name: string): string | undefined {
+  ensureEnvLoaded()
   if (typeof Bun !== 'undefined') {
     return Bun.env[name]
   }
@@ -76,4 +146,9 @@ export function getTranslationConfig(): TranslationConfig {
     cachedConfig = loadTranslationConfig()
   }
   return cachedConfig
+}
+
+export function resetTranslationConfigCache(): void {
+  cachedConfig = null
+  envLoaded = false
 }
