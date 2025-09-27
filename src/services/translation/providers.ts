@@ -187,8 +187,6 @@ class OpenAIProvider implements TranslationProviderAdapter {
         additionalProperties: false
       }
       
-      console.log('[translation] Manual JSON schema:', JSON.stringify(jsonSchema, null, 2))
-      
       const response = await this.client.responses.create({
         model: this.model,
         input: [

@@ -147,7 +147,7 @@ contentRoutes.post('/trigger', async (c) => {
       translationPending: true
     }
 
-    return c.json(response)
+    return c.json(response, 202)
   } catch (error) {
     console.error('Error triggering content translation:', error)
     const errorResponse: ErrorResponse = {
