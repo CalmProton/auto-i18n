@@ -1,10 +1,16 @@
 import { z, type ZodTypeAny } from 'zod'
-import { zodTextFormat } from 'openai/helpers/zod'
 import OpenAI from 'openai'
 import Anthropic from '@anthropic-ai/sdk'
 import { getTranslationConfig, type ProviderConfig } from '../../config/env'
 import { createScopedLogger, type Logger } from '../../utils/logger'
-import { SUPPORTED_LOCALES } from '../../config/locales'
+import {
+  TRANSLATION_SYSTEM_PROMPT,
+  buildJsonTranslationPrompt,
+  buildMarkdownTranslationPrompt,
+  JSON_RESPONSE_DIRECTIVE,
+  JSON_TRANSLATION_WRAPPER_DIRECTIVE,
+  MARKDOWN_RESPONSE_DIRECTIVE
+} from './prompts'
 import type {
   TranslationProviderAdapter,
   MarkdownTranslationInput,
@@ -40,10 +46,6 @@ function parseJsonResponse(raw: string): unknown {
   } catch (error) {
     throw new Error(`Provider returned invalid JSON: ${(error as Error).message}`)
   }
-}
-
-function localeName(code: string): string {
-  return SUPPORTED_LOCALES.find((item) => item.code === code)?.name ?? code
 }
 
 function jsonType(value: unknown): string {
@@ -125,8 +127,7 @@ class OpenAIProvider implements TranslationProviderAdapter {
   }
 
   async translateMarkdown(job: MarkdownTranslationInput): Promise<string> {
-    const prompt = `Translate the following Markdown content from ${localeName(job.sourceLocale)} (${job.sourceLocale}) to ${localeName(job.targetLocale)} (${job.targetLocale}). ` +
-      'Preserve the original Markdown structure, code fences, front matter, and placeholders. Only return the translated Markdown without commentary.'
+    const prompt = buildMarkdownTranslationPrompt(job.sourceLocale, job.targetLocale)
 
     try {
       this.log.info('Sending markdown translation request', {
@@ -160,8 +161,7 @@ class OpenAIProvider implements TranslationProviderAdapter {
   }
 
   async translateJson(job: JsonTranslationInput): Promise<unknown> {
-    const prompt = `Translate the JSON values from ${localeName(job.sourceLocale)} (${job.sourceLocale}) to ${localeName(job.targetLocale)} (${job.targetLocale}). ` +
-      'Do not change the keys or structure. Only return valid JSON with translated string values. Leave non-string values untouched.'
+    const prompt = buildJsonTranslationPrompt(job.sourceLocale, job.targetLocale)
 
     try {
       this.log.info('Sending JSON translation request', {
@@ -217,7 +217,7 @@ class OpenAIProvider implements TranslationProviderAdapter {
         input: [
           {
             role: 'system',
-            content: 'You are a professional localization specialist.'
+            content: TRANSLATION_SYSTEM_PROMPT
           },
           {
             role: 'user',
@@ -267,11 +267,11 @@ class OpenAIProvider implements TranslationProviderAdapter {
         input: [
           {
             role: 'system',
-            content: 'You are a professional localization specialist.'
+            content: TRANSLATION_SYSTEM_PROMPT
           },
           {
             role: 'user',
-            content: `${instruction}\n\nInput JSON:\n${stringifyJson(data)}\n\nPlease return the translated JSON wrapped in an object with a "translation" key like this: {"translation": <your_translated_json>}`
+            content: `${instruction}\n\nInput JSON:\n${stringifyJson(data)}\n\n${JSON_TRANSLATION_WRAPPER_DIRECTIVE}`
           }
         ],
         text: {
@@ -368,8 +368,7 @@ class AnthropicProvider implements TranslationProviderAdapter {
   }
 
   async translateMarkdown(job: MarkdownTranslationInput): Promise<string> {
-    const prompt = `Translate the following Markdown content from ${localeName(job.sourceLocale)} (${job.sourceLocale}) to ${localeName(job.targetLocale)} (${job.targetLocale}). ` +
-      'Preserve the original Markdown structure, code fences, front matter, and placeholders. Only return the translated Markdown without commentary.'
+    const prompt = buildMarkdownTranslationPrompt(job.sourceLocale, job.targetLocale)
 
     try {
       this.log.info('Sending markdown translation request', {
@@ -403,8 +402,7 @@ class AnthropicProvider implements TranslationProviderAdapter {
   }
 
   async translateJson(job: JsonTranslationInput): Promise<unknown> {
-    const prompt = `Translate the JSON values from ${localeName(job.sourceLocale)} (${job.sourceLocale}) to ${localeName(job.targetLocale)} (${job.targetLocale}). ` +
-      'Do not change the keys or structure. Only return valid JSON with translated string values. Leave non-string values untouched.'
+    const prompt = buildJsonTranslationPrompt(job.sourceLocale, job.targetLocale)
 
     try {
       this.log.info('Sending JSON translation request', {
@@ -445,11 +443,11 @@ class AnthropicProvider implements TranslationProviderAdapter {
       })
       const message = await this.client.messages.create({
         model: this.model,
-        system: 'You are a professional localization specialist.',
+        system: TRANSLATION_SYSTEM_PROMPT,
         messages: [
           {
             role: 'user',
-            content: `${instruction}\n\n${expectJson ? 'Input JSON:' : 'Content:'}\n${content}\n\n${expectJson ? 'Return only the translated JSON.' : 'Return only the translated Markdown.'}`
+            content: `${instruction}\n\n${expectJson ? 'Input JSON:' : 'Content:'}\n${content}\n\n${expectJson ? JSON_RESPONSE_DIRECTIVE : MARKDOWN_RESPONSE_DIRECTIVE}`
           }
         ],
         max_tokens: 4096

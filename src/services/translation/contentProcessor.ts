@@ -10,6 +10,32 @@ function getTargetLocales(sourceLocale: string): string[] {
 
 const log = createScopedLogger('translation:content')
 
+function sanitizeMarkdownContent(content: string): string {
+  const newline = content.includes('\r\n') ? '\r\n' : '\n'
+  const originalEndsWithNewline = /\r?\n$/.test(content)
+  const lines = content.split(/\r?\n/)
+
+  if (lines.length > 1 && lines[0]?.trim() === '---' && lines[1]?.trim() === '---') {
+    lines.splice(1, 1)
+  }
+
+  let lastIndex = lines.length - 1
+  while (lastIndex >= 0 && lines[lastIndex]?.trim() === '') {
+    lastIndex -= 1
+  }
+
+  if (lastIndex > 0 && lines[lastIndex]?.trim() === '---' && lines[lastIndex - 1]?.trim() === '::') {
+    lines.splice(lastIndex, 1)
+  }
+
+  let sanitized = lines.join(newline)
+  if (originalEndsWithNewline && !sanitized.endsWith(newline)) {
+    sanitized += newline
+  }
+
+  return sanitized
+}
+
 export async function translateContentFiles(request: ContentUploadRequest): Promise<SavedFileInfo[]> {
   const provider = getTranslationProvider()
   const targetLocales = getTargetLocales(request.locale)
@@ -70,6 +96,8 @@ export async function translateContentFiles(request: ContentUploadRequest): Prom
           content: item.text
         })
 
+        const sanitizedContent = sanitizeMarkdownContent(translated)
+
         const saved = await saveTextToTemp({
           senderId: request.senderId,
           locale: targetLocale,
@@ -77,7 +105,7 @@ export async function translateContentFiles(request: ContentUploadRequest): Prom
           category: 'translations',
           folderName: item.entry.folderPath,
           filename: item.entry.file.name,
-          content: translated
+          content: sanitizedContent
         })
 
         translatedFiles.push(saved)
