@@ -368,7 +368,7 @@ class DeepseekProvider implements TranslationProviderAdapter {
     this.baseURL = config.baseUrl && config.baseUrl.trim().length > 0 ? config.baseUrl : DEFAULT_DEEPSEEK_BASE_URL
     this.client = new OpenAI({
       apiKey: config.apiKey,
-      baseURL: this.baseURL
+      // baseURL: this.baseURL
     })
     this.log = baseLogger.child({ provider: this.name, model: this.model, baseURL: this.baseURL })
   }
