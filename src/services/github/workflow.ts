@@ -454,8 +454,17 @@ ${typesList}
         labels: issueLabels
       })
 
-  const seededFiles: Array<{ path: string; content: string }> = []
-  // Process all jobs, not just the current one
+  // Collect all files to be processed by locale
+  const filesByLocale = new Map<string, { seeded: Array<{ path: string; content: string }>, translated: Array<{ path: string; content: string }> }>()
+  
+  // Initialize maps for each target locale
+  for (const locale of targetLocales) {
+    if (locale !== sourceLocale) {
+      filesByLocale.set(locale, { seeded: [], translated: [] })
+    }
+  }
+
+  // Process all jobs to collect seeded files by locale
   for (const currentJob of metadata.jobs) {
     if (!currentJob.files) continue
     
@@ -477,35 +486,15 @@ ${typesList}
           continue
         }
         const targetRepoPath = deriveTargetRepoPath(descriptor, locale, sourceLocale)
-        seededFiles.push({ path: targetRepoPath, content: sourceContent })
+        const localeFiles = filesByLocale.get(locale)
+        if (localeFiles) {
+          localeFiles.seeded.push({ path: targetRepoPath, content: sourceContent })
+        }
       }
     }
   }
 
-  const baseCommit = await client.getCommit(owner, repo, baseCommitSha)
-  const firstCommit = await createCommitFromFiles(
-    client,
-    owner,
-    repo,
-    baseCommit.tree.sha,
-    baseCommit.sha,
-    seededFiles,
-    `chore(i18n): seed ${targetLocales.join(', ')} from ${sourceLocale}
-
-🌱 Created ${seededFiles.length} locale files across ${targetLocales.length} target locales
-📁 Source files: ${allFiles.length} (${Object.keys(filesByType).join(', ')})
-🎯 Target locales: ${targetLocales.map(l => `\`${l}\``).join(', ')}`
-  )
-
-  let currentCommitSha = firstCommit?.sha ?? baseCommit.sha
-  let currentTreeSha = firstCommit?.tree.sha ?? baseCommit.tree.sha
-  const commits: Array<{ sha: string; message: string }> = []
-  if (firstCommit) {
-    commits.push({ sha: firstCommit.sha, message: firstCommit.message })
-  }
-
-  const translatedFiles: Array<{ path: string; content: string }> = []
-  // Process all jobs, not just the current one
+  // Process all jobs to collect translated files by locale
   for (const currentJob of metadata.jobs) {
     if (!currentJob.files) continue
     
@@ -526,29 +515,84 @@ ${typesList}
           continue
         }
         const targetRepoPath = deriveTargetRepoPath(descriptor, locale, sourceLocale)
-        translatedFiles.push({ path: targetRepoPath, content: translationContent })
+        const localeFiles = filesByLocale.get(locale)
+        if (localeFiles) {
+          localeFiles.translated.push({ path: targetRepoPath, content: translationContent })
+        }
       }
     }
   }
 
-  if (translatedFiles.length > 0) {
-    const secondCommit = await createCommitFromFiles(
+  const baseCommit = await client.getCommit(owner, repo, baseCommitSha)
+  let currentCommitSha = baseCommit.sha
+  let currentTreeSha = baseCommit.tree.sha
+  const commits: Array<{ sha: string; message: string }> = []
+
+  // Create per-locale commits for seeding
+  for (const locale of targetLocales) {
+    if (locale === sourceLocale) continue
+    
+    const localeFiles = filesByLocale.get(locale)
+    if (!localeFiles || localeFiles.seeded.length === 0) continue
+
+    const seededCommit = await createCommitFromFiles(
       client,
       owner,
       repo,
       currentTreeSha,
       currentCommitSha,
-      translatedFiles,
-      `feat(i18n): apply translations for ${targetLocales.join(', ')}
+      localeFiles.seeded,
+      `chore(i18n): seed ${locale} from ${sourceLocale}
 
-🔄 Applied automated translations to ${translatedFiles.length} files
-✨ Translation complete for ${targetLocales.map(l => `\`${l}\``).join(', ')}
+🌱 Created ${localeFiles.seeded.length} locale files for ${locale}
+📁 Source files: ${allFiles.length} (${Object.keys(filesByType).join(', ')})
+🎯 Target locale: \`${locale}\``
+    )
+    
+    if (seededCommit) {
+      commits.push({ sha: seededCommit.sha, message: seededCommit.message })
+      currentCommitSha = seededCommit.sha
+      currentTreeSha = seededCommit.tree.sha
+      
+      log.info('Created seeding commit for locale', {
+        locale,
+        commitSha: seededCommit.sha,
+        filesCount: localeFiles.seeded.length
+      })
+    }
+  }
+
+  // Create per-locale commits for translations
+  for (const locale of targetLocales) {
+    if (locale === sourceLocale) continue
+    
+    const localeFiles = filesByLocale.get(locale)
+    if (!localeFiles || localeFiles.translated.length === 0) continue
+
+    const translatedCommit = await createCommitFromFiles(
+      client,
+      owner,
+      repo,
+      currentTreeSha,
+      currentCommitSha,
+      localeFiles.translated,
+      `feat(i18n): apply translations for ${locale}
+
+🔄 Applied automated translations to ${localeFiles.translated.length} files
+✨ Translation complete for \`${locale}\`
 🤖 Generated by auto-i18n`
     )
-    if (secondCommit) {
-      commits.push({ sha: secondCommit.sha, message: secondCommit.message })
-      currentCommitSha = secondCommit.sha
-      currentTreeSha = secondCommit.tree.sha
+    
+    if (translatedCommit) {
+      commits.push({ sha: translatedCommit.sha, message: translatedCommit.message })
+      currentCommitSha = translatedCommit.sha
+      currentTreeSha = translatedCommit.tree.sha
+      
+      log.info('Created translation commit for locale', {
+        locale,
+        commitSha: translatedCommit.sha,
+        filesCount: localeFiles.translated.length
+      })
     }
   }
 
@@ -557,11 +601,15 @@ ${typesList}
     await client.updateRef(owner, repo, `heads/${branchName}`, currentCommitSha, true)
   }
 
+  // Calculate total files processed across all locales
+  const totalSeededFiles = Array.from(filesByLocale.values()).reduce((sum, locale) => sum + locale.seeded.length, 0)
+  const totalTranslatedFiles = Array.from(filesByLocale.values()).reduce((sum, locale) => sum + locale.translated.length, 0)
+
   if (commits.length === 0) {
     log.error('No commits created', {
       senderId: options.senderId,
-      seededFilesCount: seededFiles.length,
-      translatedFilesCount: translatedFiles.length,
+      seededFilesCount: totalSeededFiles,
+      translatedFilesCount: totalTranslatedFiles,
       totalJobs: metadata.jobs.length
     })
     throw new Error('No file changes were produced for this translation job. Aborting pull request creation.')
@@ -573,9 +621,6 @@ ${typesList}
     ?? `🌐 Translation: ${sourceLocale} → ${targetLocales.join(', ')}`
 
   const prBody = pullRequestMetadata?.body ?? (() => {
-    const totalSeeded = seededFiles.length
-    const totalTranslated = translatedFiles.length
-
     const commitDetails = commits.map((commit, index) => {
       const shortSha = commit.sha.substring(0, 7)
       return `${index + 1}. \`${shortSha}\` ${commit.message}`
@@ -583,12 +628,18 @@ ${typesList}
 
     const changesBreakdown = Object.keys(filesByType).map(type => {
       const count = filesByType[type].length
-      const seededCount = seededFiles.filter(f => 
-        f.path.includes(`/${type}/`) || f.path.startsWith(`${type}/`)
-      ).length
-      const translatedCount = translatedFiles.filter(f => 
-        f.path.includes(`/${type}/`) || f.path.startsWith(`${type}/`)
-      ).length
+      let seededCount = 0
+      let translatedCount = 0
+      
+      // Count files for this type across all locales
+      for (const localeData of filesByLocale.values()) {
+        seededCount += localeData.seeded.filter((f: { path: string }) => 
+          f.path.includes(`/${type}/`) || f.path.startsWith(`${type}/`)
+        ).length
+        translatedCount += localeData.translated.filter((f: { path: string }) => 
+          f.path.includes(`/${type}/`) || f.path.startsWith(`${type}/`)
+        ).length
+      }
       
       return `- **${type}**: ${count} source file${count !== 1 ? 's' : ''} → ${seededCount + translatedCount} locale file${seededCount + translatedCount !== 1 ? 's' : ''}`
     }).join('\n')
@@ -600,9 +651,9 @@ ${typesList}
 - **Targets**: ${targetLocales.map(locale => `\`${locale}\``).join(', ')}
 
 ### Changes Overview
-- **🌱 Seeded Files**: ${totalSeeded} (base content copied to target locales)
-- **🔄 Translated Files**: ${totalTranslated} (automated translations applied)
-- **📁 Total Changed Files**: ${totalSeeded + translatedFiles.length}
+- **🌱 Seeded Files**: ${totalSeededFiles} (base content copied to target locales)
+- **🔄 Translated Files**: ${totalTranslatedFiles} (automated translations applied)
+- **📁 Total Changed Files**: ${totalSeededFiles + totalTranslatedFiles}
 
 ### File Breakdown by Type
 ${changesBreakdown}
@@ -631,7 +682,7 @@ ${issue.number > 0 ? `\n---\nCloses #${issue.number}` : ''}
     if (targetLocales.length > 1) {
       prLabels.push('multi-locale')
     }
-    if (translatedFiles.length > 0) {
+    if (totalTranslatedFiles > 0) {
       prLabels.push('ready-for-review')
     }
     
@@ -664,7 +715,7 @@ ${issue.number > 0 ? `\n---\nCloses #${issue.number}` : ''}
     branchName,
     baseCommitSha,
   seededLocales: targetLocales.filter((locale) => locale !== sourceLocale),
-  translatedLocales: translatedFiles.length > 0 ? targetLocales.filter((locale) => locale !== sourceLocale) : [],
+  translatedLocales: totalTranslatedFiles > 0 ? targetLocales.filter((locale) => locale !== sourceLocale) : [],
     issueNumber: issue.number,
     pullRequestNumber: pullRequest.number,
     pullRequestUrl: pullRequest.html_url ?? '',

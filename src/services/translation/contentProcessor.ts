@@ -74,7 +74,8 @@ export async function translateContentFiles(request: ContentUploadRequest): Prom
   )
 
   const translatedFiles: SavedFileInfo[] = []
-  let translationFailed = false
+  let failedTranslations = 0
+  let skippedLocales = 0
 
   const totalTranslations = targetLocales.length * prepared.length
   let completedTranslations = 0
@@ -88,7 +89,8 @@ export async function translateContentFiles(request: ContentUploadRequest): Prom
   })
 
   for (const targetLocale of targetLocales) {
-    if (translationFailed) break
+    let localeHasErrors = false
+    let localeSuccessCount = 0
     
     log.info('Processing target locale for content', {
       senderId: request.senderId,
@@ -127,6 +129,7 @@ export async function translateContentFiles(request: ContentUploadRequest): Prom
         })
 
         translatedFiles.push(saved)
+        localeSuccessCount++
         completedTranslations++
         log.info('Saved translated markdown file', {
           senderId: request.senderId,
@@ -138,6 +141,8 @@ export async function translateContentFiles(request: ContentUploadRequest): Prom
         })
       } catch (error) {
         completedTranslations++
+        failedTranslations++
+        localeHasErrors = true
         log.error('Failed to translate markdown file', {
           senderId: request.senderId,
           sourceLocale: request.locale,
@@ -147,11 +152,47 @@ export async function translateContentFiles(request: ContentUploadRequest): Prom
           progress: `${completedTranslations}/${totalTranslations}`,
           remaining: totalTranslations - completedTranslations
         })
-        translationFailed = true
-        break
+        // Continue with next file instead of breaking the entire process
       }
     }
+
+    if (localeHasErrors) {
+      if (localeSuccessCount === 0) {
+        skippedLocales++
+        log.warn('All translations failed for locale, skipping', {
+          senderId: request.senderId,
+          sourceLocale: request.locale,
+          targetLocale,
+          failedCount: prepared.length
+        })
+      } else {
+        log.warn('Some translations failed for locale', {
+          senderId: request.senderId,
+          sourceLocale: request.locale,
+          targetLocale,
+          successCount: localeSuccessCount,
+          failedCount: prepared.length - localeSuccessCount
+        })
+      }
+    } else {
+      log.info('Successfully completed all translations for locale', {
+        senderId: request.senderId,
+        sourceLocale: request.locale,
+        targetLocale,
+        successCount: localeSuccessCount
+      })
+    }
   }
+
+  log.info('Content translation batch completed', {
+    senderId: request.senderId,
+    sourceLocale: request.locale,
+    totalTargetLocales: targetLocales.length,
+    successfulFiles: translatedFiles.length,
+    failedTranslations,
+    skippedLocales,
+    completionRate: `${Math.round((translatedFiles.length / totalTranslations) * 100)}%`
+  })
 
   return translatedFiles
 }
