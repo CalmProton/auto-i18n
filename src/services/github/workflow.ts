@@ -65,14 +65,24 @@ function splitPath(value: string): string[] {
 function collectLocalesFromTranslations(senderId: string): string[] {
   const basePath = resolveTempFilePath(senderId, ['translations'])
   if (!existsSync(basePath)) {
+    log.warn('Translations directory does not exist', { senderId, basePath })
     return []
   }
 
   try {
     const entries = readdirSync(basePath, { withFileTypes: true })
-    return entries
+    const locales = entries
       .filter((entry) => entry.isDirectory())
       .map((entry) => entry.name)
+    
+    log.info('Collected locales from translations', {
+      senderId,
+      basePath,
+      locales,
+      totalEntries: entries.length
+    })
+    
+    return locales
   } catch (error) {
     log.warn('Unable to enumerate translation locales', {
       senderId,
@@ -202,16 +212,45 @@ async function prepareJob(options: FinalizeTranslationJobOptions): Promise<Prepa
   }
 
   let targetLocales = job.targetLocales ?? metadata.targetLocales
-  if (!targetLocales || targetLocales.length === 0) {
+  log.info('Initial target locales', {
+    senderId: options.senderId,
+    jobTargetLocales: job.targetLocales,
+    metadataTargetLocales: metadata.targetLocales,
+    targetLocales
+  })
+  
+  // Check if we need to collect locales from translations directory
+  // This happens when: no target locales, empty array, or only contains source locale
+  const needsCollection = !targetLocales || 
+    targetLocales.length === 0 || 
+    (targetLocales.length === 1 && targetLocales[0] === sourceLocale)
+  
+  if (needsCollection) {
     targetLocales = collectLocalesFromTranslations(options.senderId)
+    log.info('Collected target locales from translations', {
+      senderId: options.senderId,
+      collectedLocales: targetLocales,
+      reason: needsCollection
+    })
   }
 
   if (!targetLocales || targetLocales.length === 0) {
     throw new Error('No target locales available for translation job.')
   }
 
-  // ensure uniqueness and stable order
-  const uniqueTargets = Array.from(new Set(targetLocales))
+  // ensure uniqueness and stable order, exclude source locale from targets
+  const uniqueTargets = Array.from(new Set(targetLocales)).filter(locale => locale !== sourceLocale)
+  
+  log.info('Processed target locales', {
+    senderId: options.senderId,
+    sourceLocale,
+    originalTargets: targetLocales,
+    uniqueTargets
+  })
+
+  if (uniqueTargets.length === 0) {
+    throw new Error('No valid target locales available after excluding source locale.')
+  }
 
   const branchSource: TranslationBranchMetadata = {
     prefix: job.branch?.prefix ?? metadata.branch?.prefix,
@@ -330,39 +369,116 @@ export async function finalizeTranslationJob(
     targetLocales
   })
 
+  // Ensure required labels exist in the repository
   if (!options.dryRun) {
-    await client.createRef(owner, repo, `heads/${branchName}`, baseCommitSha)
+    const requiredLabels = [
+      { name: 'i18n', color: '0052cc', description: 'Internationalization and localization' },
+      { name: 'translation', color: '1d76db', description: 'Translation work' },
+      { name: 'automated', color: '7057ff', description: 'Automated process' },
+      { name: 'multi-locale', color: 'fbca04', description: 'Multiple locales involved' },
+      { name: 'ready-for-review', color: '0e8a16', description: 'Ready for review' }
+    ]
+    await client.ensureLabelsExist(owner, repo, requiredLabels)
+
+    // Check if branch exists, create if it doesn't
+    const branchExists = await client.refExists(owner, repo, `heads/${branchName}`)
+    if (!branchExists) {
+      await client.createRef(owner, repo, `heads/${branchName}`, baseCommitSha)
+      log.info('Created new branch', { branchName, baseCommitSha })
+    } else {
+      log.info('Branch already exists, using existing branch', { branchName })
+    }
   }
 
+  // Prepare issue content with better formatting and metadata
+  // Aggregate files from all jobs to show complete file breakdown
+  const allFiles = metadata.jobs.flatMap(job => job.files || [])
+  const filesByType = allFiles.reduce((acc, file) => {
+    if (!acc[file.type]) acc[file.type] = []
+    acc[file.type].push(file)
+    return acc
+  }, {} as Record<string, typeof allFiles>)
+
   const issueTitle = issueMetadata?.title
-    ?? `Translate ${sourceLocale} resources to ${targetLocales.join(', ')}`
-  const issueBody = issueMetadata?.body
-    ?? `Automated translation request for locales: ${targetLocales.join(', ')}.`
+    ?? `🌐 Translation: ${sourceLocale} → ${targetLocales.join(', ')}`
+
+  const issueBody = issueMetadata?.body ?? (() => {
+    const totalFileCount = allFiles.length
+    const jobCount = metadata.jobs.length
+    const typesList = Object.keys(filesByType).map(type => {
+      const count = filesByType[type].length
+      return `- **${type}**: ${count} file${count !== 1 ? 's' : ''}`
+    }).join('\n')
+
+    const jobsList = metadata.jobs.map(jobItem => {
+      const jobFileCount = jobItem.files?.length || 0
+      return `- **${jobItem.id}** (${jobItem.type}): ${jobFileCount} file${jobFileCount !== 1 ? 's' : ''}`
+    }).join('\n')
+
+    return `## 🎯 Translation Request
+
+### Source & Targets
+- **Source Locale**: \`${sourceLocale}\`
+- **Target Locales**: ${targetLocales.map(locale => `\`${locale}\``).join(', ')}
+
+### Translation Jobs
+**Total Jobs**: ${jobCount}
+**Total Files**: ${totalFileCount}
+
+${jobsList}
+
+### File Breakdown by Type
+${typesList}
+
+### Repository Details
+- **Repository**: ${owner}/${repo}
+- **Base Branch**: \`${baseBranch}\`
+- **Work Branch**: \`${branchName}\`
+
+---
+*This is an automated translation request created by auto-i18n*`
+  })()
+
+  const issueLabels = ['i18n', 'translation', 'automated']
+  if (targetLocales.length > 1) {
+    issueLabels.push('multi-locale')
+  }
 
   const issue = options.dryRun
     ? { number: 0, url: '', html_url: '', title: issueTitle }
-    : await client.createIssue({ owner, repo, title: issueTitle, body: issueBody })
+    : await client.createIssue({ 
+        owner, 
+        repo, 
+        title: issueTitle, 
+        body: issueBody,
+        labels: issueLabels
+      })
 
   const seededFiles: Array<{ path: string; content: string }> = []
-  for (const descriptor of job.files) {
-    const sourcePath = resolveTempFilePath(options.senderId, [
-      'uploads',
-      sourceLocale,
-      descriptor.type,
-      descriptor.sourceTempRelativePath
-    ])
+  // Process all jobs, not just the current one
+  for (const currentJob of metadata.jobs) {
+    if (!currentJob.files) continue
+    
+    for (const descriptor of currentJob.files) {
+      const sourcePath = resolveTempFilePath(options.senderId, [
+        'uploads',
+        sourceLocale,
+        descriptor.type,
+        descriptor.sourceTempRelativePath
+      ])
 
-    const sourceContent = await readTempFile(sourcePath)
-    if (!sourceContent) {
-      continue
-    }
-
-    for (const locale of targetLocales) {
-      if (locale === sourceLocale) {
+      const sourceContent = await readTempFile(sourcePath)
+      if (!sourceContent) {
         continue
       }
-      const targetRepoPath = deriveTargetRepoPath(descriptor, locale, sourceLocale)
-      seededFiles.push({ path: targetRepoPath, content: sourceContent })
+
+      for (const locale of targetLocales) {
+        if (locale === sourceLocale) {
+          continue
+        }
+        const targetRepoPath = deriveTargetRepoPath(descriptor, locale, sourceLocale)
+        seededFiles.push({ path: targetRepoPath, content: sourceContent })
+      }
     }
   }
 
@@ -374,7 +490,11 @@ export async function finalizeTranslationJob(
     baseCommit.tree.sha,
     baseCommit.sha,
     seededFiles,
-    `chore(i18n): seed ${targetLocales.join(', ')} from ${sourceLocale}`
+    `chore(i18n): seed ${targetLocales.join(', ')} from ${sourceLocale}
+
+🌱 Created ${seededFiles.length} locale files across ${targetLocales.length} target locales
+📁 Source files: ${allFiles.length} (${Object.keys(filesByType).join(', ')})
+🎯 Target locales: ${targetLocales.map(l => `\`${l}\``).join(', ')}`
   )
 
   let currentCommitSha = firstCommit?.sha ?? baseCommit.sha
@@ -385,24 +505,29 @@ export async function finalizeTranslationJob(
   }
 
   const translatedFiles: Array<{ path: string; content: string }> = []
-  for (const descriptor of job.files) {
-    for (const locale of targetLocales) {
-      if (locale === sourceLocale) {
-        continue
+  // Process all jobs, not just the current one
+  for (const currentJob of metadata.jobs) {
+    if (!currentJob.files) continue
+    
+    for (const descriptor of currentJob.files) {
+      for (const locale of targetLocales) {
+        if (locale === sourceLocale) {
+          continue
+        }
+        const translationRelative = deriveTranslationTempRelativePath(descriptor, locale, sourceLocale)
+        const translationPath = resolveTempFilePath(options.senderId, [
+          'translations',
+          locale,
+          descriptor.type,
+          translationRelative
+        ])
+        const translationContent = await readTempFile(translationPath)
+        if (!translationContent) {
+          continue
+        }
+        const targetRepoPath = deriveTargetRepoPath(descriptor, locale, sourceLocale)
+        translatedFiles.push({ path: targetRepoPath, content: translationContent })
       }
-      const translationRelative = deriveTranslationTempRelativePath(descriptor, locale, sourceLocale)
-      const translationPath = resolveTempFilePath(options.senderId, [
-        'translations',
-        locale,
-        descriptor.type,
-        translationRelative
-      ])
-      const translationContent = await readTempFile(translationPath)
-      if (!translationContent) {
-        continue
-      }
-      const targetRepoPath = deriveTargetRepoPath(descriptor, locale, sourceLocale)
-      translatedFiles.push({ path: targetRepoPath, content: translationContent })
     }
   }
 
@@ -414,7 +539,11 @@ export async function finalizeTranslationJob(
       currentTreeSha,
       currentCommitSha,
       translatedFiles,
-      `feat(i18n): apply translations for ${targetLocales.join(', ')}`
+      `feat(i18n): apply translations for ${targetLocales.join(', ')}
+
+🔄 Applied automated translations to ${translatedFiles.length} files
+✨ Translation complete for ${targetLocales.map(l => `\`${l}\``).join(', ')}
+🤖 Generated by auto-i18n`
     )
     if (secondCommit) {
       commits.push({ sha: secondCommit.sha, message: secondCommit.message })
@@ -424,23 +553,103 @@ export async function finalizeTranslationJob(
   }
 
   if (!options.dryRun) {
-    await client.updateRef(owner, repo, `heads/${branchName}`, currentCommitSha)
+    // Use force update to handle existing branches
+    await client.updateRef(owner, repo, `heads/${branchName}`, currentCommitSha, true)
   }
 
   if (commits.length === 0) {
+    log.error('No commits created', {
+      senderId: options.senderId,
+      seededFilesCount: seededFiles.length,
+      translatedFilesCount: translatedFiles.length,
+      totalJobs: metadata.jobs.length
+    })
     throw new Error('No file changes were produced for this translation job. Aborting pull request creation.')
   }
 
-  const prTitle = pullRequestMetadata?.title
-    ?? `Translate ${sourceLocale} ➜ ${targetLocales.join(', ')}`
-  const prBody = pullRequestMetadata?.body
-    ?? `## Summary\n\n- seed locale files for ${targetLocales.join(', ')}\n- apply automated translations${issue.number > 0 ? `\n\nCloses #${issue.number}` : ''}`
-
+  // Prepare PR content with detailed information
   const prBase = pullRequestMetadata?.baseBranch ?? baseBranch
+  const prTitle = pullRequestMetadata?.title
+    ?? `🌐 Translation: ${sourceLocale} → ${targetLocales.join(', ')}`
+
+  const prBody = pullRequestMetadata?.body ?? (() => {
+    const totalSeeded = seededFiles.length
+    const totalTranslated = translatedFiles.length
+
+    const commitDetails = commits.map((commit, index) => {
+      const shortSha = commit.sha.substring(0, 7)
+      return `${index + 1}. \`${shortSha}\` ${commit.message}`
+    }).join('\n')
+
+    const changesBreakdown = Object.keys(filesByType).map(type => {
+      const count = filesByType[type].length
+      const seededCount = seededFiles.filter(f => 
+        f.path.includes(`/${type}/`) || f.path.startsWith(`${type}/`)
+      ).length
+      const translatedCount = translatedFiles.filter(f => 
+        f.path.includes(`/${type}/`) || f.path.startsWith(`${type}/`)
+      ).length
+      
+      return `- **${type}**: ${count} source file${count !== 1 ? 's' : ''} → ${seededCount + translatedCount} locale file${seededCount + translatedCount !== 1 ? 's' : ''}`
+    }).join('\n')
+
+    return `## 🎯 Translation Summary
+
+### Locales Processed
+- **Source**: \`${sourceLocale}\`
+- **Targets**: ${targetLocales.map(locale => `\`${locale}\``).join(', ')}
+
+### Changes Overview
+- **🌱 Seeded Files**: ${totalSeeded} (base content copied to target locales)
+- **🔄 Translated Files**: ${totalTranslated} (automated translations applied)
+- **📁 Total Changed Files**: ${totalSeeded + translatedFiles.length}
+
+### File Breakdown by Type
+${changesBreakdown}
+
+### Commits in this PR
+${commitDetails}
+
+### Repository Details
+- **Base Branch**: \`${prBase}\`
+- **Feature Branch**: \`${branchName}\`
+- **Base Commit**: \`${baseCommitSha.substring(0, 7)}\`
+
+${issue.number > 0 ? `\n---\nCloses #${issue.number}` : ''}
+
+---
+*🤖 This PR was automatically generated by auto-i18n*`
+  })()
 
   const pullRequest = options.dryRun
     ? { number: 0, url: '', html_url: '', head: { ref: branchName }, base: { ref: prBase } }
     : await client.createPullRequest({ owner, repo, title: prTitle, head: branchName, base: prBase, body: prBody })
+
+  // Add labels to the pull request (labels are added via the issues API for PRs)
+  if (!options.dryRun && pullRequest.number > 0) {
+    const prLabels = ['i18n', 'translation', 'automated']
+    if (targetLocales.length > 1) {
+      prLabels.push('multi-locale')
+    }
+    if (translatedFiles.length > 0) {
+      prLabels.push('ready-for-review')
+    }
+    
+    try {
+      await client.updatePullRequestLabels({
+        owner,
+        repo,
+        pull_number: pullRequest.number,
+        labels: prLabels
+      })
+    } catch (error) {
+      log.warn('Failed to add labels to pull request', { 
+        prNumber: pullRequest.number, 
+        labels: prLabels,
+        error 
+      })
+    }
+  }
 
   log.info('Translation finalization completed', {
     senderId: options.senderId,

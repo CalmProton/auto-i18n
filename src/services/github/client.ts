@@ -61,6 +61,27 @@ export interface CreatePullRequestRequest {
   draft?: boolean
 }
 
+export interface UpdatePullRequestLabelsRequest {
+  owner: string
+  repo: string
+  pull_number: number
+  labels: string[]
+}
+
+export interface CreateLabelRequest {
+  owner: string
+  repo: string
+  name: string
+  color: string
+  description?: string
+}
+
+export interface Label {
+  name: string
+  color: string
+  description?: string
+}
+
 export interface CreatePullRequestResponse {
   number: number
   url: string
@@ -136,6 +157,18 @@ export class GitHubClient {
     })
   }
 
+  async refExists(owner: string, repo: string, ref: string): Promise<boolean> {
+    try {
+      await this.getRef(owner, repo, ref)
+      return true
+    } catch (error: any) {
+      if (error.message.includes('404')) {
+        return false
+      }
+      throw error
+    }
+  }
+
   async createRef(owner: string, repo: string, ref: string, sha: string): Promise<GitRef> {
     return this.request<GitRef>({
       method: 'POST',
@@ -147,13 +180,13 @@ export class GitHubClient {
     })
   }
 
-  async updateRef(owner: string, repo: string, ref: string, sha: string): Promise<GitRef> {
+  async updateRef(owner: string, repo: string, ref: string, sha: string, force = false): Promise<GitRef> {
     return this.request<GitRef>({
       method: 'PATCH',
       path: `/repos/${owner}/${repo}/git/refs/${encodeURIComponent(ref)}`,
       body: {
         sha,
-        force: false
+        force
       }
     })
   }
@@ -226,5 +259,61 @@ export class GitHubClient {
       path: `/repos/${owner}/${repo}/pulls`,
       body
     })
+  }
+
+  async updatePullRequestLabels(request: UpdatePullRequestLabelsRequest): Promise<void> {
+    const { owner, repo, pull_number, labels } = request
+    await this.request<{ labels: Array<{ name: string }> }>({
+      method: 'PATCH',
+      path: `/repos/${owner}/${repo}/issues/${pull_number}`,
+      body: { labels }
+    })
+  }
+
+  async getLabels(owner: string, repo: string): Promise<Label[]> {
+    return this.request<Label[]>({
+      method: 'GET',
+      path: `/repos/${owner}/${repo}/labels`
+    })
+  }
+
+  async createLabel(request: CreateLabelRequest): Promise<Label> {
+    const { owner, repo, ...body } = request
+    return this.request<Label>({
+      method: 'POST',
+      path: `/repos/${owner}/${repo}/labels`,
+      body
+    })
+  }
+
+  async ensureLabelsExist(owner: string, repo: string, requiredLabels: Label[]): Promise<void> {
+    try {
+      const existingLabels = await this.getLabels(owner, repo)
+      const existingLabelNames = new Set(existingLabels.map(label => label.name))
+
+      for (const labelDef of requiredLabels) {
+        if (!existingLabelNames.has(labelDef.name)) {
+          try {
+            await this.createLabel({
+              owner,
+              repo,
+              name: labelDef.name,
+              color: labelDef.color,
+              description: labelDef.description
+            })
+            log.info('Created label', { owner, repo, label: labelDef.name })
+          } catch (error: any) {
+            // Only warn if it's not an "already exists" error
+            if (error?.message?.includes('already_exists') || error?.status === 422) {
+              log.debug('Label already exists', { owner, repo, label: labelDef.name })
+            } else {
+              log.warn('Failed to create label', { owner, repo, label: labelDef.name, error })
+            }
+          }
+        }
+      }
+    } catch (error) {
+      log.warn('Failed to ensure labels exist', { owner, repo, error })
+    }
   }
 }
