@@ -78,14 +78,46 @@ export async function translateGlobalFile(request: GlobalUploadRequest): Promise
     return []
   }
 
-  // Check if the JSON is empty and skip translation if so
+  // Check if the JSON is empty and create empty translation files if so
   if (isJsonEmpty(parsed)) {
-    log.info('Skipping empty global JSON file', {
+    log.info('Creating empty translation files for empty global JSON source', {
       senderId: request.senderId,
       sourceLocale: request.locale,
-      fileName: request.file.name
+      fileName: request.file.name,
+      targetLocales
     })
-    return []
+    
+    const emptyTranslations: SavedFileInfo[] = []
+    
+    for (const targetLocale of targetLocales) {
+      try {
+        const saved = await saveTextToTemp({
+          senderId: request.senderId,
+          locale: targetLocale,
+          type: 'global',
+          category: 'translations',
+          filename: buildJsonFilename(targetLocale),
+          content: serializeJson(parsed) // Use the same empty structure
+        })
+        
+        emptyTranslations.push(saved)
+        log.info('Created empty global translation file', {
+          senderId: request.senderId,
+          targetLocale,
+          path: saved.path,
+          size: saved.size
+        })
+      } catch (error) {
+        log.error('Failed to create empty global translation file', {
+          senderId: request.senderId,
+          targetLocale,
+          fileName: request.file.name,
+          error
+        })
+      }
+    }
+    
+    return emptyTranslations
   }
 
   const translated: SavedFileInfo[] = []
@@ -208,15 +240,50 @@ export async function translatePageFiles(request: PageUploadRequest): Promise<Sa
         return null
       }
 
-      // Check if the JSON is empty and skip translation if so
+      // Check if the JSON is empty and create empty translation file if so
       if (isJsonEmpty(item.parsed)) {
-        log.info('Skipping empty page JSON file', {
+        log.info('Creating empty translation file for empty page JSON source', {
           senderId: request.senderId,
           sourceLocale: request.locale,
           folderName: item.folder.folderName,
-          fileName: item.folder.file.name
+          fileName: item.folder.file.name,
+          targetLocale
         })
-        return null
+        
+        try {
+          const saved = await saveTextToTemp({
+            senderId: request.senderId,
+            locale: targetLocale,
+            type: 'page',
+            category: 'translations',
+            folderName: item.folder.folderName,
+            filename: buildJsonFilename(targetLocale),
+            content: serializeJson(item.parsed) // Use the same empty structure
+          })
+          
+          completedTranslations++
+          log.info('Created empty page translation file', {
+            senderId: request.senderId,
+            targetLocale,
+            folderName: item.folder.folderName,
+            path: saved.path,
+            size: saved.size,
+            progress: `${completedTranslations}/${totalTranslations}`,
+            remaining: totalTranslations - completedTranslations
+          })
+          
+          return saved
+        } catch (error) {
+          completedTranslations++
+          log.error('Failed to create empty page translation file', {
+            senderId: request.senderId,
+            targetLocale,
+            folderName: item.folder.folderName,
+            fileName: item.folder.file.name,
+            error
+          })
+          return null
+        }
       }
 
       try {

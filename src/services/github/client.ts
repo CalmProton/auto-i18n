@@ -132,14 +132,48 @@ export class GitHubClient {
 
     if (!response.ok) {
       const text = await response.text()
-      log.error('GitHub API request failed', {
-        method,
-        url,
-        status: response.status,
-        statusText: response.statusText,
-        body: text
-      })
-      throw new Error(`GitHub API request failed: ${response.status} ${response.statusText}`)
+      
+      // Don't log 404s as errors for expected cases
+      const is404NotFound = response.status === 404
+      const isExpected404 = is404NotFound && (
+        path.includes('/git/ref/') ||  // Branch/reference checks
+        path.includes('/branches/')    // Branch existence checks
+      )
+      
+      // Check if this is a label creation 422 error (label already exists)
+      const isLabelAlreadyExists = response.status === 422 && 
+        path.includes('/labels') && 
+        method === 'POST' &&
+        text.includes('already_exists')
+      
+      if (isExpected404) {
+        log.debug('Resource not found (expected)', {
+          method,
+          url,
+          status: response.status,
+          statusText: response.statusText
+        })
+      } else if (isLabelAlreadyExists) {
+        log.debug('Label already exists (expected)', {
+          method,
+          url,
+          status: response.status,
+          statusText: response.statusText
+        })
+      } else {
+        log.error('GitHub API request failed', {
+          method,
+          url,
+          status: response.status,
+          statusText: response.statusText,
+          body: text
+        })
+      }
+      
+      const error = new Error(`GitHub API request failed: ${response.status} ${response.statusText}`)
+      ;(error as any).status = response.status
+      ;(error as any).body = text
+      throw error
     }
 
     const contentType = response.headers.get('content-type') || ''
@@ -303,9 +337,12 @@ export class GitHubClient {
             })
             log.info('Created label', { owner, repo, label: labelDef.name })
           } catch (error: any) {
-            // Only warn if it's not an "already exists" error
-            if (error?.message?.includes('already_exists') || error?.status === 422) {
-              log.debug('Label already exists', { owner, repo, label: labelDef.name })
+            // Check if it's an "already exists" error (422 with specific body content)
+            const isAlreadyExists = error?.status === 422 && 
+              (error?.body?.includes('already_exists') || error?.message?.includes('already_exists'))
+            
+            if (isAlreadyExists) {
+              log.debug('Label already exists (skipping)', { owner, repo, label: labelDef.name })
             } else {
               log.warn('Failed to create label', { owner, repo, label: labelDef.name, error })
             }
