@@ -1,4 +1,4 @@
-import { mkdirSync, existsSync, readdirSync, renameSync } from 'node:fs'
+import { mkdirSync, existsSync } from 'node:fs'
 import { join, extname, basename } from 'node:path'
 import type { FileType, SavedFileInfo } from '../types'
 
@@ -86,49 +86,9 @@ export function resolveTranslationPath(options: Omit<SavePathOptions, 'category'
   return resolveUploadPath({ ...options, category: 'translations' })
 }
 
-export function archiveExistingUploads(options: SavePathOptions): string | null {
-  const baseDir = resolveBaseDirectory(options)
 
-  if (!existsSync(baseDir)) {
-    return null
-  }
 
-  let entries: string[]
-  try {
-    entries = readdirSync(baseDir)
-  } catch {
-    return null
-  }
-
-  if (entries.length === 0) {
-    return null
-  }
-
-  const sanitizedSender = sanitizeSegment(options.senderId)
-  const sanitizedCategory = sanitizeSegment((options.category ?? DEFAULT_CATEGORY) as string)
-  const sanitizedLocale = sanitizeSegment(options.locale)
-  const sanitizedType = sanitizeSegment(options.type)
-  const timestamp = Date.now().toString()
-
-  const archiveRoot = join(tempRoot, sanitizedSender, sanitizedCategory, 'old', timestamp)
-  ensureDirectory(archiveRoot)
-  const archiveLocaleRoot = join(archiveRoot, sanitizedLocale)
-  ensureDirectory(archiveLocaleRoot)
-
-  let archiveTarget = join(archiveLocaleRoot, sanitizedType)
-  let counter = 1
-
-  while (existsSync(archiveTarget)) {
-    archiveTarget = join(archiveLocaleRoot, `${sanitizedType}-${counter}`)
-    counter += 1
-  }
-
-  renameSync(baseDir, archiveTarget)
-
-  return archiveTarget
-}
-
-function ensureUniqueFilePath(directory: string, originalName: string): string {
+function buildFilePath(directory: string, originalName: string): string {
   const ext = extname(originalName)
   const baseName = basename(originalName, ext)
   let sanitizedBase = sanitizeSegment(baseName)
@@ -138,22 +98,14 @@ function ensureUniqueFilePath(directory: string, originalName: string): string {
     sanitizedBase = 'file'
   }
 
-  let candidate = join(directory, `${sanitizedBase}${sanitizedExt}`)
-  let counter = 1
-
-  while (existsSync(candidate)) {
-    candidate = join(directory, `${sanitizedBase}-${counter}${sanitizedExt}`)
-    counter += 1
-  }
-
-  return candidate
+  return join(directory, `${sanitizedBase}${sanitizedExt}`)
 }
 
 export async function saveFileToTemp(options: SaveFileOptions): Promise<SavedFileInfo> {
   const { file, folderName, type } = options
   const directory = buildDirectory(options)
   const originalName = file.name || `${type}-upload`
-  const filePath = ensureUniqueFilePath(directory, originalName)
+  const filePath = buildFilePath(directory, originalName)
 
   await Bun.write(filePath, file)
 
@@ -182,7 +134,7 @@ export async function saveTextToTemp(
 ): Promise<SavedFileInfo> {
   const { filename, content, folderName, type } = options
   const directory = buildDirectory(options)
-  const filePath = ensureUniqueFilePath(directory, filename)
+  const filePath = buildFilePath(directory, filename)
 
   await Bun.write(filePath, content)
 
