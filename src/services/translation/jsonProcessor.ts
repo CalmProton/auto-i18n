@@ -181,12 +181,31 @@ export async function translatePageFiles(request: PageUploadRequest): Promise<Sa
   const translated: SavedFileInfo[] = []
   let translationFailed = false
 
+  const totalTranslations = targetLocales.length * prepared.length
+  let completedTranslations = 0
+
+  log.info('Starting batch translation', {
+    senderId: request.senderId,
+    sourceLocale: request.locale,
+    targetLocaleCount: targetLocales.length,
+    folderCount: prepared.length,
+    totalTranslations
+  })
+
   for (const targetLocale of targetLocales) {
     if (translationFailed) break
     
-    for (const item of prepared) {
+    log.info('Processing target locale', {
+      senderId: request.senderId,
+      sourceLocale: request.locale,
+      targetLocale,
+      progress: `${completedTranslations}/${totalTranslations}`
+    })
+    
+    // Process all folders for this locale in parallel
+    const folderPromises = prepared.map(async (item) => {
       if (!item.parsed || !ensureObjectOrArray(item.parsed, `page/${item.folder.folderName}/${item.folder.file.name}`)) {
-        continue
+        return null
       }
 
       // Check if the JSON is empty and skip translation if so
@@ -197,7 +216,7 @@ export async function translatePageFiles(request: PageUploadRequest): Promise<Sa
           folderName: item.folder.folderName,
           fileName: item.folder.file.name
         })
-        continue
+        return null
       }
 
       try {
@@ -217,7 +236,7 @@ export async function translatePageFiles(request: PageUploadRequest): Promise<Sa
         })
 
         if (!ensureObjectOrArray(result, `translated page ${item.folder.folderName}/${targetLocale}`)) {
-          continue
+          return null
         }
 
         const saved = await saveTextToTemp({
@@ -230,26 +249,47 @@ export async function translatePageFiles(request: PageUploadRequest): Promise<Sa
           content: serializeJson(result)
         })
 
-        translated.push(saved)
+        completedTranslations++
         log.info('Saved translated page JSON', {
           senderId: request.senderId,
           targetLocale,
           folderName: item.folder.folderName,
           path: saved.path,
-          size: saved.size
+          size: saved.size,
+          progress: `${completedTranslations}/${totalTranslations}`,
+          remaining: totalTranslations - completedTranslations
         })
+        
+        return saved
       } catch (error) {
+        completedTranslations++
         log.error('Failed to translate page JSON folder', {
           senderId: request.senderId,
           sourceLocale: request.locale,
           targetLocale,
           folderName: item.folder.folderName,
           fileName: item.folder.file.name,
-          error
+          error,
+          progress: `${completedTranslations}/${totalTranslations}`,
+          remaining: totalTranslations - completedTranslations
         })
-        translationFailed = true
-        break
+        throw error
       }
+    })
+
+    try {
+      const results = await Promise.all(folderPromises)
+      const validResults = results.filter((result): result is SavedFileInfo => result !== null)
+      translated.push(...validResults)
+    } catch (error) {
+      log.error('Parallel translation failed for target locale', {
+        senderId: request.senderId,
+        sourceLocale: request.locale,
+        targetLocale,
+        error
+      })
+      translationFailed = true
+      break
     }
   }
 

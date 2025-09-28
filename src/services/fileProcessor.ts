@@ -70,7 +70,9 @@ export async function processContentFiles(request: ContentUploadRequest): Promis
         locale,
         displayPath,
         size: file.size,
-        savedPath: saved.path
+        savedPath: saved.path,
+        progress: `${index + 1}/${files.length}`,
+        remaining: files.length - (index + 1)
       })
     }
 
@@ -213,7 +215,9 @@ export async function processPageTranslations(request: PageUploadRequest): Promi
         folderName,
         fileName: file.name,
         size: file.size,
-        savedPath: saved.path
+        savedPath: saved.path,
+        progress: `${index + 1}/${folders.length}`,
+        remaining: folders.length - (index + 1)
       })
     }
 
@@ -405,7 +409,10 @@ export async function triggerContentTranslation(options: {
     }
   }
 
-  void runTranslation()
+  // Start the translation task asynchronously without waiting
+  setTimeout(() => {
+    void runTranslation()
+  }, 0)
 
   return {
     success: true,
@@ -541,7 +548,15 @@ export async function triggerPageTranslation(options: {
       })
 
       const folders = await Promise.all(
-        sources.map(async ({ folderName, filePath, fileName }) => {
+        sources.map(async ({ folderName, filePath, fileName }, index) => {
+          log.info('Loading page source file for translation', {
+            senderId,
+            locale,
+            folderName,
+            fileName,
+            progress: `${index + 1}/${sources.length}`,
+            remaining: sources.length - (index + 1)
+          })
           const arrayBuffer = await Bun.file(filePath).arrayBuffer()
           const file = new File([arrayBuffer], fileName, { type: 'application/json' })
           return {
@@ -570,7 +585,10 @@ export async function triggerPageTranslation(options: {
     }
   }
 
-  void runTranslation()
+  // Start the translation task asynchronously without waiting
+  setTimeout(() => {
+    void runTranslation()
+  }, 0)
 
   return {
     success: true,

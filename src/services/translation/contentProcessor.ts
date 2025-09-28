@@ -76,8 +76,26 @@ export async function translateContentFiles(request: ContentUploadRequest): Prom
   const translatedFiles: SavedFileInfo[] = []
   let translationFailed = false
 
+  const totalTranslations = targetLocales.length * prepared.length
+  let completedTranslations = 0
+
+  log.info('Starting content translation batch', {
+    senderId: request.senderId,
+    sourceLocale: request.locale,
+    targetLocaleCount: targetLocales.length,
+    fileCount: prepared.length,
+    totalTranslations
+  })
+
   for (const targetLocale of targetLocales) {
     if (translationFailed) break
+    
+    log.info('Processing target locale for content', {
+      senderId: request.senderId,
+      sourceLocale: request.locale,
+      targetLocale,
+      progress: `${completedTranslations}/${totalTranslations}`
+    })
     
     for (const item of prepared) {
       try {
@@ -109,19 +127,25 @@ export async function translateContentFiles(request: ContentUploadRequest): Prom
         })
 
         translatedFiles.push(saved)
+        completedTranslations++
         log.info('Saved translated markdown file', {
           senderId: request.senderId,
           targetLocale,
           path: saved.path,
-          size: saved.size
+          size: saved.size,
+          progress: `${completedTranslations}/${totalTranslations}`,
+          remaining: totalTranslations - completedTranslations
         })
       } catch (error) {
+        completedTranslations++
         log.error('Failed to translate markdown file', {
           senderId: request.senderId,
           sourceLocale: request.locale,
           targetLocale,
           path: item.relativePath,
-          error
+          error,
+          progress: `${completedTranslations}/${totalTranslations}`,
+          remaining: totalTranslations - completedTranslations
         })
         translationFailed = true
         break
