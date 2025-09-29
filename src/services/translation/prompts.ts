@@ -4,7 +4,7 @@ function localeDisplayName(code: string): string {
   return SUPPORTED_LOCALES.find((item) => item.code === code)?.name ?? code
 }
 
-export const TRANSLATION_SYSTEM_PROMPT = `You are an expert localization specialist with deep knowledge of cultural nuances, idioms, and linguistic patterns across multiple languages. Your translations are:
+export const TRANSLATION_SYSTEM_PROMPT = `You are an expert localization specialist with deep knowledge of cultural nuances, idioms, and linguistic patterns. Your translations are:
 - Culturally appropriate and natural-sounding in the target language
 - Accurate while adapting to local conventions (dates, numbers, currency, units)
 - Consistent in tone, formality level, and style
@@ -25,7 +25,11 @@ CRITICAL RULES:
    - Component names and technical identifiers
    - Brand names, product names, and trademarked terms unless they have official translations
 
-2. TRANSLATION APPROACH:
+2. TRANSLATE:
+   - All visible text content, including headings, paragraphs, lists, blockquotes, table content, alt text for images, and link text
+   - In MDC syntax, translate the text portions that will be visible to the user, while preserving the structure. That includes titles, descriptions, body, alt text, link text and other parameters that will be user-facing.
+
+3. TRANSLATION APPROACH:
    - Adapt idioms and expressions to natural equivalents in the target language
    - Adjust formality level appropriately for the target culture
    - Localize units of measurement, date formats, and number formats when appearing in prose
@@ -33,7 +37,7 @@ CRITICAL RULES:
    - Ensure technical terminology is translated consistently
    - For UI text, keep translations concise and appropriate for interface elements
 
-3. QUALITY CHECKS:
+4. QUALITY CHECKS:
    - Ensure translations sound natural to native speakers
    - Verify technical terms are industry-standard in the target language
    - Maintain text flow and readability
