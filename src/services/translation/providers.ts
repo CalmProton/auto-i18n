@@ -17,6 +17,7 @@ import type {
   JsonTranslationInput
 } from './types'
 import { StaggeredRequestQueue } from './requestQueue'
+import { logApiResponse, getApiLogFile } from '../../utils/apiResponseLogger'
 
 const DEFAULT_OPENAI_MODEL = 'gpt-5-mini'
 const DEFAULT_ANTHROPIC_MODEL = 'claude-3-haiku-20240307'
@@ -103,15 +104,24 @@ class OpenAIProvider implements TranslationProviderAdapter {
     })
     this.log = baseLogger.child({ provider: this.name, model: this.model })
     
-    // Initialize request queue with 1-second stagger
+    // Initialize request queue with more conservative timing
     this.requestQueue = new StaggeredRequestQueue(
       (context: MarkdownRequestContext | JsonRequestContext) => this.processRequest(context),
       {
-        staggerDelayMs: 1000,
-        maxConcurrentRequests: 50,
+        staggerDelayMs: 3000, // 3 seconds between requests to avoid rate limits
+        maxConcurrentRequests: 5, // Reduced concurrency to be more conservative
         requestTimeoutMs: 360000 // 6 minutes for LLM requests
       }
     )
+
+    this.log.info('OpenAI provider initialized', {
+      model: this.model,
+      apiLogFile: getApiLogFile(),
+      queueConfig: {
+        staggerDelayMs: 3000,
+        maxConcurrentRequests: 5
+      }
+    })
   }
 
   async translateMarkdown(job: MarkdownTranslationInput): Promise<string> {
@@ -214,44 +224,123 @@ class OpenAIProvider implements TranslationProviderAdapter {
 
   private async processRequest(context: MarkdownRequestContext | JsonRequestContext): Promise<string> {
     if (context.type === 'markdown') {
-      return await this.sendMarkdownRequest(context.instruction, context.content)
+      return await this.sendMarkdownRequest(context.instruction, context.content, context)
     } else {
-      return await this.sendJsonRequest(context.instruction, context.data, context.schema)
+      return await this.sendJsonRequest(context.instruction, context.data, context.schema, context)
     }
   }
 
-  private async sendMarkdownRequest(instruction: string, content: string): Promise<string> {
+  private async sendMarkdownRequest(instruction: string, content: string, context?: MarkdownRequestContext): Promise<string> {
+    const requestPayload = {
+      model: this.model,
+      messages: [
+        {
+          role: 'system' as const,
+          content: TRANSLATION_SYSTEM_PROMPT
+        },
+        {
+          role: 'user' as const,
+          content: `${instruction}\n\n---\n${content}\n---\n\n${MARKDOWN_RESPONSE_DIRECTIVE}`
+        }
+      ],
+      temperature: 1,
+      max_completion_tokens: 16384 // Increased to handle large translations
+    }
+
     try {
       this.log.debug('Dispatching markdown request to OpenAI', {
         model: this.model,
-        instructionPreview: previewText(instruction, 200)
-      })
-      const response = await this.client.chat.completions.create({
-        model: this.model,
-        messages: [
-          {
-            role: 'system',
-            content: TRANSLATION_SYSTEM_PROMPT
-          },
-          {
-            role: 'user',
-            content: `${instruction}\n\n---\n${content}\n---\n\n${MARKDOWN_RESPONSE_DIRECTIVE}`
-          }
-        ],
-        temperature: 0,
-        max_tokens: 4096
+        instructionPreview: previewText(instruction, 200),
+        contentLength: content.length
       })
 
+      const response = await this.client.chat.completions.create(requestPayload)
+
+      const finishReason = response.choices?.[0]?.finish_reason
+      const isSuccess = finishReason === 'stop'
       const text = response.choices?.[0]?.message?.content
+
+      // Log the complete API response
+      await logApiResponse({
+        timestamp: new Date().toISOString(),
+        provider: this.name,
+        model: this.model,
+        requestType: 'markdown',
+        senderId: context?.job.senderId || 'unknown',
+        sourceLocale: context?.job.sourceLocale || 'unknown',
+        targetLocale: context?.job.targetLocale || 'unknown',
+        filePath: context?.job.filePath || 'unknown',
+        request: requestPayload,
+        response: response,
+        success: isSuccess
+      })
+
+      this.log.debug('OpenAI response received', {
+        model: this.model,
+        choices: response.choices?.length || 0,
+        usage: response.usage,
+        finishReason: finishReason,
+        contentLength: text?.length || 0,
+        isSuccess
+      })
+
+      // Handle different finish reasons
+      if (finishReason === 'length') {
+        this.log.error('OpenAI response was truncated due to token limit', {
+          model: this.model,
+          finishReason,
+          usage: response.usage,
+          maxTokens: requestPayload.max_completion_tokens
+        })
+        throw new Error('Response truncated: Token limit exceeded. Consider breaking down the content into smaller pieces.')
+      }
+
+      if (finishReason !== 'stop') {
+        this.log.error('OpenAI response finished unexpectedly', {
+          model: this.model,
+          finishReason,
+          expectedFinishReason: 'stop'
+        })
+        throw new Error(`Unexpected finish reason: ${finishReason}`)
+      }
+
       if (!text || typeof text !== 'string' || text.trim().length === 0) {
+        this.log.error('OpenAI returned empty markdown content', {
+          model: this.model,
+          responseChoices: response.choices,
+          responseStructure: {
+            hasChoices: !!response.choices,
+            choicesLength: response.choices?.length,
+            firstChoiceMessage: response.choices?.[0]?.message,
+            fullResponse: JSON.stringify(response, null, 2)
+          }
+        })
         throw new Error('Empty response from OpenAI')
       }
       return text
     } catch (error) {
+      // Log the error response
+      await logApiResponse({
+        timestamp: new Date().toISOString(),
+        provider: this.name,
+        model: this.model,
+        requestType: 'markdown',
+        senderId: context?.job.senderId || 'unknown',
+        sourceLocale: context?.job.sourceLocale || 'unknown',
+        targetLocale: context?.job.targetLocale || 'unknown',
+        filePath: context?.job.filePath || 'unknown',
+        request: requestPayload,
+        response: null,
+        error: error,
+        success: false
+      })
+
       if (error instanceof OpenAI.APIError) {
         this.log.error('OpenAI markdown request failed', {
           status: error.status,
           message: error.message,
+          type: error.type,
+          code: error.code,
           error
         })
         throw new Error(`OpenAI request failed (${error.status}): ${error.message}`)
@@ -261,43 +350,120 @@ class OpenAIProvider implements TranslationProviderAdapter {
     }
   }
 
-  private async sendJsonRequest(instruction: string, data: unknown, _schema: ZodTypeAny | null): Promise<string> {
+  private async sendJsonRequest(instruction: string, data: unknown, _schema: ZodTypeAny | null, context?: JsonRequestContext): Promise<string> {
+    const requestPayload = {
+      model: this.model,
+      messages: [
+        {
+          role: 'system' as const,
+          content: TRANSLATION_SYSTEM_PROMPT
+        },
+        {
+          role: 'user' as const,
+          content: `${instruction}\n\nInput JSON:\n${stringifyJson(data)}\n\n${JSON_TRANSLATION_WRAPPER_DIRECTIVE}\n${JSON_RESPONSE_DIRECTIVE}`
+        }
+      ],
+      temperature: 1,
+      max_completion_tokens: 16384, // Increased to handle large translations
+      response_format: {
+        type: 'json_object' as const
+      }
+    }
+
     try {
       this.log.debug('Dispatching JSON request to OpenAI', {
         model: this.model,
-        instructionPreview: previewText(instruction, 200)
+        instructionPreview: previewText(instruction, 200),
+        dataType: jsonType(data)
       })
 
-      const response = await this.client.chat.completions.create({
-        model: this.model,
-        messages: [
-          {
-            role: 'system',
-            content: TRANSLATION_SYSTEM_PROMPT
-          },
-          {
-            role: 'user',
-            content: `${instruction}\n\nInput JSON:\n${stringifyJson(data)}\n\n${JSON_TRANSLATION_WRAPPER_DIRECTIVE}\n${JSON_RESPONSE_DIRECTIVE}`
-          }
-        ],
-        temperature: 0,
-        max_tokens: 4096,
-        response_format: {
-          type: 'json_object'
-        }
-      })
+      const response = await this.client.chat.completions.create(requestPayload)
 
+      const finishReason = response.choices?.[0]?.finish_reason
+      const isSuccess = finishReason === 'stop'
       const text = response.choices?.[0]?.message?.content
+
+      // Log the complete API response
+      await logApiResponse({
+        timestamp: new Date().toISOString(),
+        provider: this.name,
+        model: this.model,
+        requestType: 'json',
+        senderId: context?.job.senderId || 'unknown',
+        sourceLocale: context?.job.sourceLocale || 'unknown',
+        targetLocale: context?.job.targetLocale || 'unknown',
+        filePath: context?.job.filePath || 'unknown',
+        request: requestPayload,
+        response: response,
+        success: isSuccess
+      })
+
+      this.log.debug('OpenAI JSON response received', {
+        model: this.model,
+        choices: response.choices?.length || 0,
+        usage: response.usage,
+        finishReason: finishReason,
+        contentLength: text?.length || 0,
+        isSuccess
+      })
+
+      // Handle different finish reasons
+      if (finishReason === 'length') {
+        this.log.error('OpenAI JSON response was truncated due to token limit', {
+          model: this.model,
+          finishReason,
+          usage: response.usage,
+          maxTokens: requestPayload.max_completion_tokens
+        })
+        throw new Error('JSON response truncated: Token limit exceeded. Consider breaking down the content into smaller pieces.')
+      }
+
+      if (finishReason !== 'stop') {
+        this.log.error('OpenAI JSON response finished unexpectedly', {
+          model: this.model,
+          finishReason,
+          expectedFinishReason: 'stop'
+        })
+        throw new Error(`Unexpected finish reason: ${finishReason}`)
+      }
       
       if (!text || typeof text !== 'string' || text.trim().length === 0) {
+        this.log.error('OpenAI returned empty JSON content', {
+          model: this.model,
+          responseChoices: response.choices,
+          responseStructure: {
+            hasChoices: !!response.choices,
+            choicesLength: response.choices?.length,
+            firstChoiceMessage: response.choices?.[0]?.message,
+            fullResponse: JSON.stringify(response, null, 2)
+          }
+        })
         throw new Error('Empty JSON response from OpenAI')
       }
       return text
     } catch (error) {
+      // Log the error response
+      await logApiResponse({
+        timestamp: new Date().toISOString(),
+        provider: this.name,
+        model: this.model,
+        requestType: 'json',
+        senderId: context?.job.senderId || 'unknown',
+        sourceLocale: context?.job.sourceLocale || 'unknown',
+        targetLocale: context?.job.targetLocale || 'unknown',
+        filePath: context?.job.filePath || 'unknown',
+        request: requestPayload,
+        response: null,
+        error: error,
+        success: false
+      })
+
       if (error instanceof OpenAI.APIError) {
         this.log.error('OpenAI JSON request failed', {
           status: error.status,
           message: error.message,
+          type: error.type,
+          code: error.code,
           error
         })
         throw new Error(`OpenAI request failed (${error.status}): ${error.message}`)
@@ -373,12 +539,12 @@ class DeepseekProvider implements TranslationProviderAdapter {
     })
     this.log = baseLogger.child({ provider: this.name, model: this.model, baseURL: this.baseURL })
     
-    // Initialize request queue with 1-second stagger
+    // Initialize request queue with conservative timing
     this.requestQueue = new StaggeredRequestQueue(
       (context: MarkdownRequestContext | JsonRequestContext) => this.processRequest(context),
       {
-        staggerDelayMs: 1000,
-        maxConcurrentRequests: 5,
+        staggerDelayMs: 2000, // 2 seconds between requests
+        maxConcurrentRequests: 3, // Reduced concurrency
         requestTimeoutMs: 120000 // 2 minutes for LLM requests
       }
     )
@@ -497,7 +663,7 @@ class DeepseekProvider implements TranslationProviderAdapter {
           }
         ],
         temperature: 0,
-        max_tokens: 4096
+        max_tokens: 16384 // Increased token limit
       })
       return this.extractMessageText(response)
     } else {
@@ -515,7 +681,7 @@ class DeepseekProvider implements TranslationProviderAdapter {
           }
         ],
         temperature: 0,
-        max_tokens: 4096,
+        max_tokens: 16384, // Increased token limit
         response_format: {
           type: 'json_object'
         }
@@ -527,6 +693,26 @@ class DeepseekProvider implements TranslationProviderAdapter {
   private extractMessageText(response: OpenAI.Chat.Completions.ChatCompletion): string {
     const firstChoice = response.choices?.[0]
     const content = firstChoice?.message?.content
+    const finishReason = firstChoice?.finish_reason
+
+    // Check for token limit issues
+    if (finishReason === 'length') {
+      this.log.error('Deepseek response was truncated due to token limit', {
+        model: this.model,
+        finishReason,
+        usage: response.usage
+      })
+      throw new Error('Response truncated: Token limit exceeded. Consider breaking down the content into smaller pieces.')
+    }
+
+    if (finishReason !== 'stop') {
+      this.log.error('Deepseek response finished unexpectedly', {
+        model: this.model,
+        finishReason,
+        expectedFinishReason: 'stop'
+      })
+      throw new Error(`Unexpected finish reason: ${finishReason}`)
+    }
 
     if (typeof content === 'string') {
       return content
@@ -573,12 +759,12 @@ class AnthropicProvider implements TranslationProviderAdapter {
     })
     this.log = baseLogger.child({ provider: this.name, model: this.model })
     
-    // Initialize request queue with 1-second stagger
+    // Initialize request queue with conservative timing
     this.requestQueue = new StaggeredRequestQueue(
       (context: MarkdownRequestContext | JsonRequestContext) => this.processRequest(context),
       {
-        staggerDelayMs: 1000,
-        maxConcurrentRequests: 5,
+        staggerDelayMs: 2000, // 2 seconds between requests
+        maxConcurrentRequests: 3, // Reduced concurrency
         requestTimeoutMs: 120000 // 2 minutes for LLM requests
       }
     )
@@ -692,8 +878,27 @@ class AnthropicProvider implements TranslationProviderAdapter {
             content: `${instruction}\n\n${expectJson ? 'Input JSON:' : 'Content:'}\n${content}\n\n${expectJson ? JSON_RESPONSE_DIRECTIVE : MARKDOWN_RESPONSE_DIRECTIVE}`
           }
         ],
-        max_tokens: 4096
+        max_tokens: 16384 // Increased token limit
       })
+
+      // Check stop reason for Anthropic
+      if (message.stop_reason === 'max_tokens') {
+        this.log.error('Anthropic response was truncated due to token limit', {
+          model: this.model,
+          stopReason: message.stop_reason,
+          usage: message.usage
+        })
+        throw new Error('Response truncated: Token limit exceeded. Consider breaking down the content into smaller pieces.')
+      }
+
+      if (message.stop_reason !== 'end_turn') {
+        this.log.error('Anthropic response stopped unexpectedly', {
+          model: this.model,
+          stopReason: message.stop_reason,
+          expectedStopReason: 'end_turn'
+        })
+        throw new Error(`Unexpected stop reason: ${message.stop_reason}`)
+      }
 
       const text = message.content
         .filter(block => block.type === 'text')
@@ -752,8 +957,10 @@ let cachedProvider: TranslationProviderAdapter | null = null
 function createProvider(): TranslationProviderAdapter {
   try {
     const config = getTranslationConfig()
+    const apiLogFile = getApiLogFile()
     baseLogger.info('Initializing translation provider', {
       provider: config.provider,
+      apiResponseLogFile: apiLogFile,
       availableProviders: Object.entries(config.providers).map(([name, providerConfig]) => ({
         name,
         hasApiKey: Boolean(providerConfig?.apiKey)
