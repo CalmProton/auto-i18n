@@ -16,13 +16,30 @@ import type {
   MarkdownTranslationInput,
   JsonTranslationInput
 } from './types'
+import { StaggeredRequestQueue } from './requestQueue'
 
-const DEFAULT_OPENAI_MODEL = 'gpt-4o-2024-08-06'
+const DEFAULT_OPENAI_MODEL = 'gpt-5-mini'
 const DEFAULT_ANTHROPIC_MODEL = 'claude-3-haiku-20240307'
 const DEFAULT_DEEPSEEK_MODEL = 'deepseek-chat'
 const DEFAULT_DEEPSEEK_BASE_URL = 'https://api.deepseek.com'
 
 const baseLogger = createScopedLogger('translation:provider')
+
+// Request queue types
+interface MarkdownRequestContext {
+  type: 'markdown'
+  job: MarkdownTranslationInput
+  instruction: string
+  content: string
+}
+
+interface JsonRequestContext {
+  type: 'json'
+  job: JsonTranslationInput
+  instruction: string
+  data: unknown
+  schema: ZodTypeAny | null
+}
 
 function cloneValue<T>(value: T): T {
   if (typeof structuredClone === 'function') {
@@ -69,49 +86,6 @@ function previewText(value: string, maxLength = 200): string {
   return `${sliced}… [+${omitted} chars]`
 }
 
-function buildSchemaFromJson(value: unknown): ZodTypeAny {
-  const kind = jsonType(value)
-
-  switch (kind) {
-    case 'string':
-      return z.string()
-    case 'number':
-      return z.number()
-    case 'boolean':
-      return z.boolean()
-    case 'null':
-      return z.null()
-    case 'array': {
-      const arrayValue = value as unknown[]
-      if (arrayValue.length === 0) {
-        return z.array(z.string())
-      }
-
-      const firstKind = jsonType(arrayValue[0])
-      const uniform = arrayValue.every((item) => jsonType(item) === firstKind)
-      if (uniform) {
-        return z.array(buildSchemaFromJson(arrayValue[0]))
-      }
-
-      // For mixed arrays, fallback to unknown for simplicity
-
-      return z.array(z.unknown())
-    }
-    case 'object': {
-      const entries = Object.entries(value as Record<string, unknown>)
-      const shape: Record<string, ZodTypeAny> = {}
-
-      for (const [key, entryValue] of entries) {
-        shape[key] = buildSchemaFromJson(entryValue)
-      }
-
-      return z.object(shape).passthrough()
-    }
-    default:
-      return z.unknown()
-  }
-}
-
 class OpenAIProvider implements TranslationProviderAdapter {
   public readonly name = 'openai' as const
   public readonly isFallback = false
@@ -119,6 +93,7 @@ class OpenAIProvider implements TranslationProviderAdapter {
   private readonly model: string
   private readonly client: OpenAI
   private readonly log: Logger
+  private readonly requestQueue: StaggeredRequestQueue<MarkdownRequestContext | JsonRequestContext, string>
 
   constructor(private readonly config: ProviderConfig) {
     this.model = config.model && config.model.trim().length > 0 ? config.model : DEFAULT_OPENAI_MODEL
@@ -127,30 +102,49 @@ class OpenAIProvider implements TranslationProviderAdapter {
       ...(config.baseUrl ? { baseURL: config.baseUrl } : {})
     })
     this.log = baseLogger.child({ provider: this.name, model: this.model })
+    
+    // Initialize request queue with 1-second stagger
+    this.requestQueue = new StaggeredRequestQueue(
+      (context: MarkdownRequestContext | JsonRequestContext) => this.processRequest(context),
+      {
+        staggerDelayMs: 1000,
+        maxConcurrentRequests: 50,
+        requestTimeoutMs: 360000 // 6 minutes for LLM requests
+      }
+    )
   }
 
   async translateMarkdown(job: MarkdownTranslationInput): Promise<string> {
     const prompt = buildMarkdownTranslationPrompt(job.sourceLocale, job.targetLocale)
 
+    this.log.info('Enqueuing markdown translation request', {
+      senderId: job.senderId,
+      sourceLocale: job.sourceLocale,
+      targetLocale: job.targetLocale,
+      filePath: job.filePath,
+      contentLength: job.content.length,
+      contentPreview: previewText(job.content, 300),
+      queueStats: this.requestQueue.getStats()
+    })
+
     try {
-      this.log.info('Sending markdown translation request', {
-        senderId: job.senderId,
-        sourceLocale: job.sourceLocale,
-        targetLocale: job.targetLocale,
-        filePath: job.filePath,
-        contentLength: job.content.length,
-        contentPreview: previewText(job.content, 300)
+      const result = await this.requestQueue.enqueue({
+        type: 'markdown',
+        job,
+        instruction: prompt,
+        content: job.content
       })
-      const text = await this.sendMarkdownRequest(prompt, job.content)
+      
       this.log.info('Received markdown translation response', {
         senderId: job.senderId,
         sourceLocale: job.sourceLocale,
         targetLocale: job.targetLocale,
         filePath: job.filePath,
-        responseLength: text.length,
-        responsePreview: previewText(text, 300)
+        responseLength: result.length,
+        responsePreview: previewText(result, 300)
       })
-      return text.trim().length > 0 ? text : job.content
+      
+      return result.trim().length > 0 ? result : job.content
     } catch (error) {
       this.log.error('Markdown translation failed', {
         senderId: job.senderId,
@@ -166,15 +160,24 @@ class OpenAIProvider implements TranslationProviderAdapter {
   async translateJson(job: JsonTranslationInput): Promise<unknown> {
     const prompt = buildJsonTranslationPrompt(job.sourceLocale, job.targetLocale)
 
+    this.log.info('Enqueuing JSON translation request', {
+      senderId: job.senderId,
+      sourceLocale: job.sourceLocale,
+      targetLocale: job.targetLocale,
+      filePath: job.filePath,
+      dataType: jsonType(job.data),
+      queueStats: this.requestQueue.getStats()
+    })
+
     try {
-      this.log.info('Sending JSON translation request', {
-        senderId: job.senderId,
-        sourceLocale: job.sourceLocale,
-        targetLocale: job.targetLocale,
-        filePath: job.filePath,
-        dataType: jsonType(job.data)
+      const response = await this.requestQueue.enqueue({
+        type: 'json',
+        job,
+        instruction: prompt,
+        data: job.data,
+        schema: null
       })
-      const response = await this.sendJsonRequest(prompt, job.data, null)
+      
       const parsed = parseJsonResponse(response) as { translation: unknown }
       
       // Validate the response has the same structure as input
@@ -209,27 +212,37 @@ class OpenAIProvider implements TranslationProviderAdapter {
     }
   }
 
+  private async processRequest(context: MarkdownRequestContext | JsonRequestContext): Promise<string> {
+    if (context.type === 'markdown') {
+      return await this.sendMarkdownRequest(context.instruction, context.content)
+    } else {
+      return await this.sendJsonRequest(context.instruction, context.data, context.schema)
+    }
+  }
+
   private async sendMarkdownRequest(instruction: string, content: string): Promise<string> {
     try {
       this.log.debug('Dispatching markdown request to OpenAI', {
         model: this.model,
         instructionPreview: previewText(instruction, 200)
       })
-      const response = await this.client.responses.create({
+      const response = await this.client.chat.completions.create({
         model: this.model,
-        input: [
+        messages: [
           {
             role: 'system',
             content: TRANSLATION_SYSTEM_PROMPT
           },
           {
             role: 'user',
-            content: `${instruction}\n\n---\n${content}\n---`
+            content: `${instruction}\n\n---\n${content}\n---\n\n${MARKDOWN_RESPONSE_DIRECTIVE}`
           }
-        ]
+        ],
+        temperature: 0,
+        max_tokens: 4096
       })
 
-      const text = response.output_text
+      const text = response.choices?.[0]?.message?.content
       if (!text || typeof text !== 'string' || text.trim().length === 0) {
         throw new Error('Empty response from OpenAI')
       }
@@ -250,44 +263,31 @@ class OpenAIProvider implements TranslationProviderAdapter {
 
   private async sendJsonRequest(instruction: string, data: unknown, _schema: ZodTypeAny | null): Promise<string> {
     try {
-      // Create a proper JSON Schema manually to ensure it's correct
-      const jsonSchema = {
-        type: "object" as const,
-        properties: {
-          translation: this.buildJsonSchemaFromData(data)
-        },
-        required: ["translation"],
-        additionalProperties: false
-      }
-      
       this.log.debug('Dispatching JSON request to OpenAI', {
         model: this.model,
         instructionPreview: previewText(instruction, 200)
       })
 
-      const response = await this.client.responses.create({
+      const response = await this.client.chat.completions.create({
         model: this.model,
-        input: [
+        messages: [
           {
             role: 'system',
             content: TRANSLATION_SYSTEM_PROMPT
           },
           {
             role: 'user',
-            content: `${instruction}\n\nInput JSON:\n${stringifyJson(data)}\n\n${JSON_TRANSLATION_WRAPPER_DIRECTIVE}`
+            content: `${instruction}\n\nInput JSON:\n${stringifyJson(data)}\n\n${JSON_TRANSLATION_WRAPPER_DIRECTIVE}\n${JSON_RESPONSE_DIRECTIVE}`
           }
         ],
-        text: {
-          format: {
-            type: "json_schema",
-            name: "translation",
-            strict: true,
-            schema: jsonSchema
-          }
+        temperature: 0,
+        max_tokens: 4096,
+        response_format: {
+          type: 'json_object'
         }
       })
 
-      const text = response.output_text
+      const text = response.choices?.[0]?.message?.content
       
       if (!text || typeof text !== 'string' || text.trim().length === 0) {
         throw new Error('Empty JSON response from OpenAI')
@@ -362,6 +362,7 @@ class DeepseekProvider implements TranslationProviderAdapter {
   private readonly client: OpenAI
   private readonly log: Logger
   private readonly baseURL: string
+  private readonly requestQueue: StaggeredRequestQueue<MarkdownRequestContext | JsonRequestContext, string>
 
   constructor(private readonly config: ProviderConfig) {
     this.model = config.model && config.model.trim().length > 0 ? config.model : DEFAULT_DEEPSEEK_MODEL
@@ -371,49 +372,49 @@ class DeepseekProvider implements TranslationProviderAdapter {
       // baseURL: this.baseURL
     })
     this.log = baseLogger.child({ provider: this.name, model: this.model, baseURL: this.baseURL })
+    
+    // Initialize request queue with 1-second stagger
+    this.requestQueue = new StaggeredRequestQueue(
+      (context: MarkdownRequestContext | JsonRequestContext) => this.processRequest(context),
+      {
+        staggerDelayMs: 1000,
+        maxConcurrentRequests: 5,
+        requestTimeoutMs: 120000 // 2 minutes for LLM requests
+      }
+    )
   }
 
   async translateMarkdown(job: MarkdownTranslationInput): Promise<string> {
     const prompt = buildMarkdownTranslationPrompt(job.sourceLocale, job.targetLocale)
 
+    this.log.info('Enqueuing markdown translation request', {
+      senderId: job.senderId,
+      sourceLocale: job.sourceLocale,
+      targetLocale: job.targetLocale,
+      filePath: job.filePath,
+      contentLength: job.content.length,
+      contentPreview: previewText(job.content, 300),
+      queueStats: this.requestQueue.getStats()
+    })
+
     try {
-      this.log.info('Sending markdown translation request', {
-        senderId: job.senderId,
-        sourceLocale: job.sourceLocale,
-        targetLocale: job.targetLocale,
-        filePath: job.filePath,
-        contentLength: job.content.length,
-        contentPreview: previewText(job.content, 300)
+      const result = await this.requestQueue.enqueue({
+        type: 'markdown',
+        job,
+        instruction: prompt,
+        content: job.content
       })
-
-      const response = await this.client.chat.completions.create({
-        model: this.model,
-        messages: [
-          {
-            role: 'system',
-            content: TRANSLATION_SYSTEM_PROMPT
-          },
-          {
-            role: 'user',
-            content: `${prompt}\n\n---\n${job.content}\n---\n\n${MARKDOWN_RESPONSE_DIRECTIVE}`
-          }
-        ],
-        temperature: 0,
-        max_tokens: 4096
-      })
-
-      const text = this.extractMessageText(response)
-
+      
       this.log.info('Received markdown translation response', {
         senderId: job.senderId,
         sourceLocale: job.sourceLocale,
         targetLocale: job.targetLocale,
         filePath: job.filePath,
-        responseLength: text.length,
-        responsePreview: previewText(text, 300)
+        responseLength: result.length,
+        responsePreview: previewText(result, 300)
       })
 
-      return text.trim().length > 0 ? text : job.content
+      return result.trim().length > 0 ? result : job.content
     } catch (error) {
       this.log.error('Markdown translation failed', {
         senderId: job.senderId,
@@ -428,48 +429,26 @@ class DeepseekProvider implements TranslationProviderAdapter {
 
   async translateJson(job: JsonTranslationInput): Promise<unknown> {
     const prompt = buildJsonTranslationPrompt(job.sourceLocale, job.targetLocale)
-    const example = this.buildExampleJson(job.data)
+
+    this.log.info('Enqueuing JSON translation request', {
+      senderId: job.senderId,
+      sourceLocale: job.sourceLocale,
+      targetLocale: job.targetLocale,
+      filePath: job.filePath,
+      dataType: jsonType(job.data),
+      queueStats: this.requestQueue.getStats()
+    })
 
     try {
-      this.log.info('Sending JSON translation request', {
-        senderId: job.senderId,
-        sourceLocale: job.sourceLocale,
-        targetLocale: job.targetLocale,
-        filePath: job.filePath,
-        dataType: jsonType(job.data)
+      const response = await this.requestQueue.enqueue({
+        type: 'json',
+        job,
+        instruction: prompt,
+        data: job.data,
+        schema: null
       })
 
-      const response = await this.client.chat.completions.create({
-        model: this.model,
-        messages: [
-          {
-            role: 'system',
-            content: `${TRANSLATION_SYSTEM_PROMPT}\nThis task requires json output.`
-          },
-          {
-            role: 'user',
-            content: `${prompt}\n\nInput JSON:\n${stringifyJson(job.data)}\n\nEXAMPLE JSON OUTPUT (structure must exactly match the input JSON):\n${example}\n\n${JSON_TRANSLATION_WRAPPER_DIRECTIVE}\n${JSON_RESPONSE_DIRECTIVE}`
-          }
-        ],
-        temperature: 0,
-        max_tokens: 4096,
-        response_format: {
-          type: 'json_object'
-        }
-      })
-
-      const text = this.extractMessageText(response)
-
-      this.log.info('Received JSON translation response', {
-        senderId: job.senderId,
-        sourceLocale: job.sourceLocale,
-        targetLocale: job.targetLocale,
-        filePath: job.filePath,
-        responseLength: text.length,
-        responsePreview: previewText(text, 300)
-      })
-
-      const parsed = parseJsonResponse(text) as { translation: unknown }
+      const parsed = parseJsonResponse(response) as { translation: unknown }
 
       if (jsonType(job.data) !== jsonType(parsed.translation)) {
         this.log.warn('JSON translation response type mismatch, returning original data', {
@@ -483,6 +462,13 @@ class DeepseekProvider implements TranslationProviderAdapter {
         return cloneValue(job.data)
       }
 
+      this.log.info('Received JSON translation response', {
+        senderId: job.senderId,
+        sourceLocale: job.sourceLocale,
+        targetLocale: job.targetLocale,
+        filePath: job.filePath
+      })
+
       return parsed.translation
     } catch (error) {
       this.log.error('JSON translation failed', {
@@ -493,6 +479,48 @@ class DeepseekProvider implements TranslationProviderAdapter {
         error
       })
       throw error
+    }
+  }
+
+  private async processRequest(context: MarkdownRequestContext | JsonRequestContext): Promise<string> {
+    if (context.type === 'markdown') {
+      const response = await this.client.chat.completions.create({
+        model: this.model,
+        messages: [
+          {
+            role: 'system',
+            content: TRANSLATION_SYSTEM_PROMPT
+          },
+          {
+            role: 'user',
+            content: `${context.instruction}\n\n---\n${context.content}\n---\n\n${MARKDOWN_RESPONSE_DIRECTIVE}`
+          }
+        ],
+        temperature: 0,
+        max_tokens: 4096
+      })
+      return this.extractMessageText(response)
+    } else {
+      const example = this.buildExampleJson(context.data)
+      const response = await this.client.chat.completions.create({
+        model: this.model,
+        messages: [
+          {
+            role: 'system',
+            content: `${TRANSLATION_SYSTEM_PROMPT}\nThis task requires json output.`
+          },
+          {
+            role: 'user',
+            content: `${context.instruction}\n\nInput JSON:\n${stringifyJson(context.data)}\n\nEXAMPLE JSON OUTPUT (structure must exactly match the input JSON):\n${example}\n\n${JSON_TRANSLATION_WRAPPER_DIRECTIVE}\n${JSON_RESPONSE_DIRECTIVE}`
+          }
+        ],
+        temperature: 0,
+        max_tokens: 4096,
+        response_format: {
+          type: 'json_object'
+        }
+      })
+      return this.extractMessageText(response)
     }
   }
 
@@ -536,6 +564,7 @@ class AnthropicProvider implements TranslationProviderAdapter {
   private readonly model: string
   private readonly client: Anthropic
   private readonly log: Logger
+  private readonly requestQueue: StaggeredRequestQueue<MarkdownRequestContext | JsonRequestContext, string>
 
   constructor(private readonly config: ProviderConfig) {
     this.model = config.model && config.model.trim().length > 0 ? config.model : DEFAULT_ANTHROPIC_MODEL
@@ -543,30 +572,48 @@ class AnthropicProvider implements TranslationProviderAdapter {
       apiKey: config.apiKey
     })
     this.log = baseLogger.child({ provider: this.name, model: this.model })
+    
+    // Initialize request queue with 1-second stagger
+    this.requestQueue = new StaggeredRequestQueue(
+      (context: MarkdownRequestContext | JsonRequestContext) => this.processRequest(context),
+      {
+        staggerDelayMs: 1000,
+        maxConcurrentRequests: 5,
+        requestTimeoutMs: 120000 // 2 minutes for LLM requests
+      }
+    )
   }
 
   async translateMarkdown(job: MarkdownTranslationInput): Promise<string> {
     const prompt = buildMarkdownTranslationPrompt(job.sourceLocale, job.targetLocale)
 
+    this.log.info('Enqueuing markdown translation request', {
+      senderId: job.senderId,
+      sourceLocale: job.sourceLocale,
+      targetLocale: job.targetLocale,
+      filePath: job.filePath,
+      contentLength: job.content.length,
+      contentPreview: previewText(job.content, 300),
+      queueStats: this.requestQueue.getStats()
+    })
+
     try {
-      this.log.info('Sending markdown translation request', {
-        senderId: job.senderId,
-        sourceLocale: job.sourceLocale,
-        targetLocale: job.targetLocale,
-        filePath: job.filePath,
-        contentLength: job.content.length,
-        contentPreview: previewText(job.content, 300)
+      const result = await this.requestQueue.enqueue({
+        type: 'markdown',
+        job,
+        instruction: prompt,
+        content: job.content
       })
-      const text = await this.sendMessage(prompt, job.content, false)
+      
       this.log.info('Received markdown translation response', {
         senderId: job.senderId,
         sourceLocale: job.sourceLocale,
         targetLocale: job.targetLocale,
         filePath: job.filePath,
-        responseLength: text.length,
-        responsePreview: previewText(text, 300)
+        responseLength: result.length,
+        responsePreview: previewText(result, 300)
       })
-      return text.trim().length > 0 ? text : job.content
+      return result.trim().length > 0 ? result : job.content
     } catch (error) {
       this.log.error('Markdown translation failed', {
         senderId: job.senderId,
@@ -582,24 +629,33 @@ class AnthropicProvider implements TranslationProviderAdapter {
   async translateJson(job: JsonTranslationInput): Promise<unknown> {
     const prompt = buildJsonTranslationPrompt(job.sourceLocale, job.targetLocale)
 
+    this.log.info('Enqueuing JSON translation request', {
+      senderId: job.senderId,
+      sourceLocale: job.sourceLocale,
+      targetLocale: job.targetLocale,
+      filePath: job.filePath,
+      dataType: jsonType(job.data),
+      queueStats: this.requestQueue.getStats()
+    })
+
     try {
-      this.log.info('Sending JSON translation request', {
-        senderId: job.senderId,
-        sourceLocale: job.sourceLocale,
-        targetLocale: job.targetLocale,
-        filePath: job.filePath,
-        dataType: jsonType(job.data)
+      const result = await this.requestQueue.enqueue({
+        type: 'json',
+        job,
+        instruction: prompt,
+        data: job.data,
+        schema: null
       })
-      const text = await this.sendMessage(prompt, stringifyJson(job.data), true)
+      
       this.log.info('Received JSON translation response', {
         senderId: job.senderId,
         sourceLocale: job.sourceLocale,
         targetLocale: job.targetLocale,
         filePath: job.filePath,
-        responseLength: text.length,
-        responsePreview: previewText(text, 300)
+        responseLength: result.length,
+        responsePreview: previewText(result, 300)
       })
-      return parseJsonResponse(text)
+      return parseJsonResponse(result)
     } catch (error) {
       this.log.error('JSON translation failed', {
         senderId: job.senderId,
@@ -609,6 +665,14 @@ class AnthropicProvider implements TranslationProviderAdapter {
         error
       })
       throw error
+    }
+  }
+
+  private async processRequest(context: MarkdownRequestContext | JsonRequestContext): Promise<string> {
+    if (context.type === 'markdown') {
+      return await this.sendMessage(context.instruction, context.content, false)
+    } else {
+      return await this.sendMessage(context.instruction, stringifyJson(context.data), true)
     }
   }
 
