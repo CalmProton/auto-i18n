@@ -8,7 +8,12 @@ import { logApiResponse, getApiLogFile } from '../../../utils/apiResponseLogger'
 import type { Logger } from '../../../utils/logger'
 import { baseLogger, cloneValue, jsonType, parseJsonResponse, previewText, stringifyJson, type JsonRequestContext, type MarkdownRequestContext, type TranslationRequestContext } from '../providerShared'
 
-const DEFAULT_OPENAI_MODEL = 'gpt-5-mini'
+export const DEFAULT_OPENAI_MODEL = 'gpt-5-mini'
+
+export function resolveOpenAIModel(config: ProviderConfig): string {
+  const configured = config.model?.trim()
+  return configured && configured.length > 0 ? configured : DEFAULT_OPENAI_MODEL
+}
 
 export class OpenAIProvider implements TranslationProviderAdapter {
   public readonly name = 'openai' as const
@@ -20,7 +25,7 @@ export class OpenAIProvider implements TranslationProviderAdapter {
   private readonly requestQueue: StaggeredRequestQueue<TranslationRequestContext, string>
 
   constructor(private readonly config: ProviderConfig) {
-    this.model = config.model && config.model.trim().length > 0 ? config.model : DEFAULT_OPENAI_MODEL
+  this.model = resolveOpenAIModel(config)
     this.client = new OpenAI({
       apiKey: config.apiKey,
       ...(config.baseUrl ? { baseURL: config.baseUrl } : {})

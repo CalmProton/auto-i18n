@@ -2,6 +2,42 @@
 
 Auto-i18n receives localization artifacts from CI pipelines, stores them in a temporary workspace, runs machine translation, and now loops changes back to the source repository via the GitHub API.
 
+## OpenAI batch translation
+
+Use the batch endpoints to prepare large translation jobs for OpenAI's asynchronous Batch API (50% discounted pricing, 24-hour SLA).
+
+### Prepare a batch input file
+
+```http
+POST /translate/batch
+Content-Type: application/json
+
+{
+  "senderId": "owner-repo-abcdef0",
+  "sourceLocale": "en",
+  "targetLocales": ["fr", "de"],
+  "includeFiles": ["blog/logo-remover-guide.md"]
+}
+```
+
+This call collects saved uploads under `tmp/<senderId>/uploads/<sourceLocale>/content`, generates `input.jsonl`, and writes a manifest to `tmp/<senderId>/batches/<batchId>/`.
+
+### Submit the batch to OpenAI
+
+```http
+POST /translate/batch/<batchId>/submit
+Content-Type: application/json
+
+{
+  "senderId": "owner-repo-abcdef0",
+  "metadata": {
+    "job": "nightly-content"
+  }
+}
+```
+
+The service uploads the JSONL file via OpenAI's Files API, creates the batch, and stores the API responses alongside the manifest for later status checks and result retrieval.
+
 ## GitHub synchronization
 
 ### Environment variables
