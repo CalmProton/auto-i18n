@@ -2,3 +2,5 @@
 node_modules/
 tmp
 .env
+TODO.md
+.DS_Store
