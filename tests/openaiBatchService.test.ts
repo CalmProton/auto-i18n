@@ -2,6 +2,7 @@ import { beforeAll, afterAll, describe, expect, it } from 'bun:test'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { SUPPORTED_LOCALES } from '../src/config/locales'
 
 type EnvModule = typeof import('../src/config/env')
 
@@ -36,7 +37,7 @@ afterAll(() => {
   envModule?.resetTranslationConfigCache()
 })
 
-describe('createContentBatch', () => {
+describe('createBatch', () => {
   it('builds a JSONL file with expected payload', async () => {
     const senderId = 'ci-pipeline'
     const sourceLocale = 'en'
@@ -54,7 +55,7 @@ describe('createContentBatch', () => {
       uploadFiles
     )
 
-    const result = await batchServiceModule.createContentBatch({
+    const result = await batchServiceModule.createBatch({
       senderId,
       sourceLocale,
       targetLocales
@@ -68,7 +69,7 @@ describe('createContentBatch', () => {
     expect(lines).toHaveLength(1)
 
     const payload = JSON.parse(lines[0])
-    expect(payload.custom_id).toContain('markdown_fr')
+  expect(payload.custom_id).toContain('markdown_content_fr')
     expect(payload.method).toBe('POST')
     expect(payload.url).toBe('/v1/chat/completions')
     expect(payload.body.model).toBe('gpt-5-mini')
@@ -80,6 +81,95 @@ describe('createContentBatch', () => {
     expect(manifest.totalRequests).toBe(1)
     expect(manifest.files[0]?.relativePath).toBe('example.md')
     expect(manifest.files[0]?.targetLocale).toBe('fr')
+    expect(manifest.files[0]?.type).toBe('content')
+    expect(manifest.files[0]?.format).toBe('markdown')
+    expect(manifest.types).toEqual(['content'])
     expect(manifest.status).toBe('draft')
+  })
+
+  it('accepts "all" for targetLocales and includeFiles', async () => {
+    const senderId = 'ci-pipeline-all'
+    const sourceLocale = 'en'
+
+    const markdownA = ['# Welcome', 'This is a guide.'].join('\n')
+    const markdownB = ['# Another Doc', 'Content here.'].join('\n')
+
+    await fileStorageModule.saveFilesToTemp(
+      { senderId, locale: sourceLocale, type: 'content', category: 'uploads' },
+      [
+        { file: new File([markdownA], 'welcome.md', { type: 'text/markdown' }) },
+        { file: new File([markdownB], 'doc.md', { type: 'text/markdown' }), folderName: 'guides' }
+      ]
+    )
+
+    const expectedTargets = SUPPORTED_LOCALES.map((locale) => locale.code)
+      .filter((code) => code !== sourceLocale)
+      .sort()
+
+    const result = await batchServiceModule.createBatch({
+      senderId,
+      sourceLocale,
+      targetLocales: 'all',
+      includeFiles: 'all'
+    })
+
+    expect(result.manifest.targetLocales).toEqual(expectedTargets)
+    expect(result.requestCount).toBe(expectedTargets.length * 2)
+
+    const recordedPaths = new Set(result.manifest.files.map((file) => file.relativePath))
+    expect(recordedPaths).toEqual(new Set(['welcome.md', 'guides/doc.md']))
+    expect(result.manifest.types).toEqual(['content'])
+  })
+
+  it('includes global and page JSON uploads', async () => {
+    const senderId = 'ci-pipeline-json'
+    const sourceLocale = 'en'
+
+    const globalData = { greeting: 'Hello', nested: { info: 'Details' } }
+    await fileStorageModule.saveFileToTemp({
+      senderId,
+      locale: sourceLocale,
+      type: 'global',
+      category: 'uploads',
+      file: new File([JSON.stringify(globalData)], 'en.json', { type: 'application/json' })
+    })
+
+    await fileStorageModule.saveFilesToTemp(
+      { senderId, locale: sourceLocale, type: 'page', category: 'uploads' },
+      [
+        {
+          folderName: 'home',
+          file: new File([JSON.stringify({ title: 'Home', body: 'Welcome!' })], 'en.json', {
+            type: 'application/json'
+          })
+        }
+      ]
+    )
+
+    const result = await batchServiceModule.createBatch({
+      senderId,
+      sourceLocale,
+      targetLocales: ['fr']
+    })
+
+    expect(result.requestCount).toBe(2)
+  expect([...result.manifest.types].sort()).toEqual(['global', 'page'])
+
+    const fileTypes = result.manifest.files.map((file) => file.type)
+    expect(new Set(fileTypes)).toEqual(new Set(['global', 'page']))
+    result.manifest.files.forEach((file) => {
+      expect(file.format).toBe('json')
+      expect(file.targetLocale).toBe('fr')
+    })
+
+    const jsonlText = await Bun.file(result.inputFilePath).text()
+    const lines = jsonlText.trim().split('\n')
+    expect(lines).toHaveLength(2)
+
+    const payloads = lines.map((line) => JSON.parse(line))
+    payloads.forEach((payload) => {
+      expect(payload.body.response_format).toEqual({ type: 'json_object' })
+      expect(payload.custom_id).toContain('json_')
+    })
   })
 })

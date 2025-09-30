@@ -20,7 +20,9 @@ Content-Type: application/json
 }
 ```
 
-This call collects saved uploads under `tmp/<senderId>/uploads/<sourceLocale>/content`, generates `input.jsonl`, and writes a manifest to `tmp/<senderId>/batches/<batchId>/`.
+This call collects saved uploads under `tmp/<senderId>/uploads/<sourceLocale>/{content,global,page}`, generates `input.jsonl`, and writes a manifest to `tmp/<senderId>/batches/<batchId>/`.
+
+Set `types` to `"all"` (default) or a subset such as `"types": ["content", "global"]` to control which upload categories are included. Provide `includeFiles` entries as either raw relative paths (`"blog/post.md"`) or type-prefixed paths (`"global/en.json"`, `"page/home/en.json"`).
 
 ### Submit the batch to OpenAI
 

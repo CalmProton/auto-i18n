@@ -5,20 +5,24 @@ import { join } from 'node:path'
 import OpenAI from 'openai'
 import { getTranslationConfig } from '../../config/env'
 import { SUPPORTED_LOCALES } from '../../config/locales'
-import { TRANSLATION_SYSTEM_PROMPT, buildMarkdownTranslationPrompt, MARKDOWN_RESPONSE_DIRECTIVE } from './prompts'
+import { TRANSLATION_SYSTEM_PROMPT, buildJsonTranslationPrompt, buildMarkdownTranslationPrompt, JSON_RESPONSE_DIRECTIVE, JSON_TRANSLATION_WRAPPER_DIRECTIVE, MARKDOWN_RESPONSE_DIRECTIVE } from './prompts'
 import { resolveOpenAIModel } from './providers/openaiProvider'
 import { resolveUploadPath } from '../../utils/fileStorage'
 import { batchFileExists, getBatchFilePath, readBatchFile, sanitizeBatchSegment, writeBatchFile } from '../../utils/batchStorage'
 import { createScopedLogger } from '../../utils/logger'
+import type { TranslationFileType } from '../../types'
+import { stringifyJson } from './providerShared'
 
 const log = createScopedLogger('translation:openaiBatch')
 
-export type BatchContentType = 'content'
+export type BatchTranslationType = TranslationFileType
+export type BatchRequestFormat = 'markdown' | 'json'
 export type BatchStatus = 'draft' | 'submitted' | 'completed' | 'failed'
 
 export interface BatchRequestRecord {
   customId: string
-  type: 'markdown'
+  type: BatchTranslationType
+  format: BatchRequestFormat
   relativePath: string
   sourceLocale: string
   targetLocale: string
@@ -30,7 +34,7 @@ export interface BatchRequestRecord {
 export interface BatchManifest {
   batchId: string
   senderId: string
-  type: BatchContentType
+  types: BatchTranslationType[]
   sourceLocale: string
   targetLocales: string[]
   model: string
@@ -48,14 +52,15 @@ export interface BatchManifest {
   }
 }
 
-export interface CreateContentBatchOptions {
+export interface CreateBatchOptions {
   senderId: string
   sourceLocale: string
-  targetLocales?: string[]
-  includeFiles?: string[]
+  targetLocales?: string[] | 'all'
+  includeFiles?: string[] | 'all'
+  types?: BatchTranslationType[] | 'all'
 }
 
-export interface CreateContentBatchResult {
+export interface CreateBatchResult {
   batchId: string
   requestCount: number
   manifest: BatchManifest
@@ -75,7 +80,9 @@ export interface SubmitBatchResult {
   inputFileId: string
 }
 
-type ContentSourceFile = {
+type BatchSourceFile = {
+  type: BatchTranslationType
+  format: BatchRequestFormat
   folderPath?: string
   filePath: string
   relativePath: string
@@ -83,7 +90,8 @@ type ContentSourceFile = {
   size: number
 }
 
-type MarkdownBatchRequest = {
+type BatchRequest = {
+  format: BatchRequestFormat
   customId: string
   body: OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming
   record: BatchRequestRecord
@@ -119,20 +127,22 @@ function createOpenAIClient(providerConfig: { apiKey: string; baseUrl?: string }
   })
 }
 
-async function collectContentSourceFiles(directory: string, relativeFolder = ''): Promise<ContentSourceFile[]> {
+async function collectContentSources(directory: string, relativeFolder = ''): Promise<BatchSourceFile[]> {
   const entries = await readdir(directory, { withFileTypes: true }).catch(() => [])
-  const collected: ContentSourceFile[] = []
+  const collected: BatchSourceFile[] = []
 
   for (const entry of entries) {
     const entryPath = join(directory, entry.name)
     if (entry.isDirectory()) {
       const nextRelative = relativeFolder ? `${relativeFolder}/${entry.name}` : entry.name
-      const nested = await collectContentSourceFiles(entryPath, nextRelative)
+      const nested = await collectContentSources(entryPath, nextRelative)
       collected.push(...nested)
     } else if (entry.isFile() && entry.name.toLowerCase().endsWith('.md')) {
       const fileStat = await stat(entryPath)
       const relativePath = relativeFolder ? `${relativeFolder}/${entry.name}` : entry.name
       collected.push({
+        type: 'content',
+        format: 'markdown',
         folderPath: relativeFolder || undefined,
         filePath: entryPath,
         relativePath,
@@ -145,12 +155,44 @@ async function collectContentSourceFiles(directory: string, relativeFolder = '')
   return collected
 }
 
-function getTargetLocales(sourceLocale: string, requested?: string[]): string[] {
+async function collectJsonSources(type: Extract<BatchTranslationType, 'global' | 'page'>, directory: string, relativeFolder = ''): Promise<BatchSourceFile[]> {
+  const entries = await readdir(directory, { withFileTypes: true }).catch(() => [])
+  const collected: BatchSourceFile[] = []
+
+  for (const entry of entries) {
+    const entryPath = join(directory, entry.name)
+    if (entry.isDirectory()) {
+      const nextRelative = relativeFolder ? `${relativeFolder}/${entry.name}` : entry.name
+      const nested = await collectJsonSources(type, entryPath, nextRelative)
+      collected.push(...nested)
+    } else if (entry.isFile() && entry.name.toLowerCase().endsWith('.json')) {
+      const fileStat = await stat(entryPath)
+      const relativePath = relativeFolder ? `${relativeFolder}/${entry.name}` : entry.name
+      collected.push({
+        type,
+        format: 'json',
+        folderPath: relativeFolder || undefined,
+        filePath: entryPath,
+        relativePath,
+        fileName: entry.name,
+        size: fileStat.size
+      })
+    }
+  }
+
+  return collected
+}
+
+function getTargetLocales(sourceLocale: string, requested?: string[] | 'all'): string[] {
   const supported = new Set(SUPPORTED_LOCALES.map((locale) => locale.code))
   if (!supported.has(sourceLocale)) {
     throw new Error(`Source locale \\"${sourceLocale}\\" is not supported`)
   }
-  if (!requested || requested.length === 0) {
+  const allTargets = Array.from(supported).filter((code) => code !== sourceLocale).sort()
+  if (!requested || requested === 'all') {
+    return allTargets
+  }
+  if (requested.length === 0) {
     return Array.from(supported).filter((code) => code !== sourceLocale).sort()
   }
   const normalized = requested.filter((code) => supported.has(code))
@@ -161,29 +203,42 @@ function getTargetLocales(sourceLocale: string, requested?: string[]): string[] 
   return Array.from(new Set(targets)).sort()
 }
 
-function normalizeRelativePath(relativePath: string): string {
-  return relativePath.replace(/\\+/g, '/').replace(/^\//, '')
+function normalizeDescriptor(value: string): string {
+  return value.replace(/\\+/g, '/').replace(/^\/+/, '').trim()
 }
 
-function shouldIncludeFile(relativePath: string, includeFiles?: string[]): boolean {
-  if (!includeFiles || includeFiles.length === 0) {
+function shouldIncludeFile(type: BatchTranslationType, relativePath: string, includeFiles?: string[] | 'all'): boolean {
+  if (!includeFiles || includeFiles === 'all' || includeFiles.length === 0) {
     return true
   }
-  const normalized = normalizeRelativePath(relativePath)
-  return includeFiles.some((entry) => normalizeRelativePath(entry) === normalized)
+  const normalizedRelative = normalizeDescriptor(relativePath)
+  const candidates = new Set([
+    normalizedRelative,
+    `${type}/${normalizedRelative}`,
+    `${type}:${normalizedRelative}`
+  ])
+
+  return includeFiles.some((entry) => {
+    const trimmed = typeof entry === 'string' ? entry.trim() : String(entry)
+    if (candidates.has(trimmed)) {
+      return true
+    }
+    return candidates.has(normalizeDescriptor(trimmed))
+  })
 }
 
-function buildCustomId(senderId: string, targetLocale: string, relativePath: string): string {
+function buildCustomId(senderId: string, targetLocale: string, type: BatchTranslationType, relativePath: string, format: BatchRequestFormat): string {
   const hash = createHash('sha1')
     .update(senderId)
     .update('\0')
     .update(targetLocale)
     .update('\0')
+    .update(type)
     .update(relativePath)
     .digest('hex')
     .slice(0, 16)
   const pathFragment = sanitizeBatchSegment(relativePath.replace(/\//g, '_')).slice(-24)
-  return `markdown_${targetLocale}_${hash}_${pathFragment}`
+  return `${format}_${type}_${targetLocale}_${hash}_${pathFragment}`
 }
 
 function buildMarkdownRequestBody(options: {
@@ -209,27 +264,55 @@ function buildMarkdownRequestBody(options: {
   }
 }
 
+function buildJsonRequestBody(options: {
+  model: string
+  instruction: string
+  data: unknown
+}): OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming {
+  const { model, instruction, data } = options
+  return {
+    model,
+    messages: [
+      {
+        role: 'system' as const,
+        content: TRANSLATION_SYSTEM_PROMPT
+      },
+      {
+        role: 'user' as const,
+        content: `${instruction}\n\nInput JSON:\n${stringifyJson(data)}\n\n${JSON_TRANSLATION_WRAPPER_DIRECTIVE}\n${JSON_RESPONSE_DIRECTIVE}`
+      }
+    ],
+    temperature: 1,
+    max_completion_tokens: 16384,
+    response_format: {
+      type: 'json_object'
+    }
+  }
+}
+
 async function buildMarkdownRequests(options: {
   senderId: string
   sourceLocale: string
   targetLocales: string[]
-  sources: ContentSourceFile[]
+  sources: BatchSourceFile[]
   model: string
-}): Promise<MarkdownBatchRequest[]> {
+}): Promise<BatchRequest[]> {
   const { senderId, sourceLocale, targetLocales, sources, model } = options
-  const requests: MarkdownBatchRequest[] = []
+  const requests: BatchRequest[] = []
 
   for (const source of sources) {
     const content = await Bun.file(source.filePath).text()
     for (const targetLocale of targetLocales) {
       const instruction = buildMarkdownTranslationPrompt(sourceLocale, targetLocale)
-      const customId = buildCustomId(senderId, targetLocale, source.relativePath)
+      const customId = buildCustomId(senderId, targetLocale, source.type, source.relativePath, source.format)
       requests.push({
+        format: 'markdown',
         customId,
         body: buildMarkdownRequestBody({ model, instruction, content }),
         record: {
           customId,
-          type: 'markdown',
+          type: source.type,
+          format: 'markdown',
           relativePath: source.relativePath,
           sourceLocale,
           targetLocale,
@@ -244,7 +327,58 @@ async function buildMarkdownRequests(options: {
   return requests
 }
 
-function serializeJsonl(requests: MarkdownBatchRequest[]): string {
+async function buildJsonRequests(options: {
+  senderId: string
+  sourceLocale: string
+  targetLocales: string[]
+  sources: BatchSourceFile[]
+  model: string
+}): Promise<BatchRequest[]> {
+  const { senderId, sourceLocale, targetLocales, sources, model } = options
+  const requests: BatchRequest[] = []
+
+  for (const source of sources) {
+    let parsed: unknown
+    try {
+      const text = await Bun.file(source.filePath).text()
+      parsed = JSON.parse(text)
+    } catch (error) {
+      log.error('Failed to parse JSON source for batch request', {
+        senderId,
+        sourceLocale,
+        type: source.type,
+        relativePath: source.relativePath,
+        error
+      })
+      continue
+    }
+
+    for (const targetLocale of targetLocales) {
+      const instruction = buildJsonTranslationPrompt(sourceLocale, targetLocale)
+      const customId = buildCustomId(senderId, targetLocale, source.type, source.relativePath, source.format)
+      requests.push({
+        format: 'json',
+        customId,
+        body: buildJsonRequestBody({ model, instruction, data: parsed }),
+        record: {
+          customId,
+          type: source.type,
+          format: 'json',
+          relativePath: source.relativePath,
+          sourceLocale,
+          targetLocale,
+          folderPath: source.folderPath,
+          fileName: source.fileName,
+          size: source.size
+        }
+      })
+    }
+  }
+
+  return requests
+}
+
+function serializeJsonl(requests: BatchRequest[]): string {
   return requests
     .map(({ customId, body }) =>
       JSON.stringify({
@@ -271,21 +405,53 @@ function saveManifest(senderId: string, batchId: string, manifest: BatchManifest
   writeBatchFile(senderId, batchId, MANIFEST_FILE_NAME, JSON.stringify(updated, null, 2))
 }
 
-export async function createContentBatch(options: CreateContentBatchOptions): Promise<CreateContentBatchResult> {
-  const { senderId, sourceLocale, targetLocales: requestedTargets, includeFiles } = options
+export async function createBatch(options: CreateBatchOptions): Promise<CreateBatchResult> {
+  const { senderId, sourceLocale, targetLocales: requestedTargets, includeFiles, types } = options
 
   const { model } = getOpenAIProviderInfo()
 
-  const uploadRoot = resolveUploadPath({ senderId, locale: sourceLocale, type: 'content', category: 'uploads' })
-  const sources = await collectContentSourceFiles(uploadRoot)
-  const filteredSources = sources.filter((source) => shouldIncludeFile(source.relativePath, includeFiles))
+  const requestedTypes = types && types !== 'all' ? new Set<BatchTranslationType>(types) : null
+
+  const sources: BatchSourceFile[] = []
+
+  if (!requestedTypes || requestedTypes.has('content')) {
+    const contentRoot = resolveUploadPath({ senderId, locale: sourceLocale, type: 'content', category: 'uploads' })
+    const contentSources = await collectContentSources(contentRoot)
+    sources.push(...contentSources)
+  }
+
+  if (!requestedTypes || requestedTypes.has('global')) {
+    const globalRoot = resolveUploadPath({ senderId, locale: sourceLocale, type: 'global', category: 'uploads' })
+    const globalSources = await collectJsonSources('global', globalRoot)
+    sources.push(...globalSources)
+  }
+
+  if (!requestedTypes || requestedTypes.has('page')) {
+    const pageRoot = resolveUploadPath({ senderId, locale: sourceLocale, type: 'page', category: 'uploads' })
+    const pageSources = await collectJsonSources('page', pageRoot)
+    sources.push(...pageSources)
+  }
+
+  const filteredSources = sources.filter((source) => shouldIncludeFile(source.type, source.relativePath, includeFiles))
 
   if (filteredSources.length === 0) {
-    throw new Error('No markdown files were found to include in the batch')
+    throw new Error('No matching files were found to include in the batch')
   }
 
   const targetLocales = getTargetLocales(sourceLocale, requestedTargets)
-  const requests = await buildMarkdownRequests({ senderId, sourceLocale, targetLocales, sources: filteredSources, model })
+
+  const markdownSources = filteredSources.filter((source) => source.format === 'markdown')
+  const jsonSources = filteredSources.filter((source) => source.format === 'json')
+
+  const markdownRequests = markdownSources.length > 0
+    ? await buildMarkdownRequests({ senderId, sourceLocale, targetLocales, sources: markdownSources, model })
+    : []
+
+  const jsonRequests = jsonSources.length > 0
+    ? await buildJsonRequests({ senderId, sourceLocale, targetLocales, sources: jsonSources, model })
+    : []
+
+  const requests = [...markdownRequests, ...jsonRequests]
 
   if (requests.length === 0) {
     throw new Error('Unable to generate any translation requests for the batch')
@@ -294,10 +460,20 @@ export async function createContentBatch(options: CreateContentBatchOptions): Pr
   const batchId = `batch_${sanitizeBatchSegment(sourceLocale)}_${Date.now()}_${randomUUID().slice(0, 8)}`
   const inputFilePath = writeBatchFile(senderId, batchId, INPUT_FILE_NAME, serializeJsonl(requests))
 
+  const sourceFileSummaries = filteredSources.map((source) => ({
+    type: source.type,
+    format: source.format,
+    relativePath: source.relativePath,
+    folderPath: source.folderPath,
+    size: source.size
+  }))
+
+  const manifestTypes = Array.from(new Set(requests.map((request) => request.record.type))).sort()
+
   const manifest: BatchManifest = {
     batchId,
     senderId,
-    type: 'content',
+    types: manifestTypes,
     sourceLocale,
     targetLocales,
     model,
@@ -314,10 +490,12 @@ export async function createContentBatch(options: CreateContentBatchOptions): Pr
     senderId,
     sourceLocale,
     batchId,
+    types: manifestTypes,
     targetLocales,
     fileCount: filteredSources.length,
     requestCount: requests.length,
-    inputFilePath
+    inputFilePath,
+    sourceFiles: sourceFileSummaries
   })
 
   return {
@@ -361,7 +539,7 @@ export async function submitBatch(options: SubmitBatchOptions): Promise<SubmitBa
     metadata: {
       senderId,
       batchId,
-      type: manifest.type,
+      types: manifest.types.join(','),
       sourceLocale: manifest.sourceLocale,
       ...(metadata ?? {})
     }

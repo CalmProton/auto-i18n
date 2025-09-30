@@ -158,18 +158,10 @@ export class OpenAIProvider implements TranslationProviderAdapter {
   private async sendMarkdownRequest(instruction: string, content: string, context?: MarkdownRequestContext): Promise<string> {
     const requestPayload = {
       model: this.model,
-      messages: [
-        {
-          role: 'system' as const,
-          content: TRANSLATION_SYSTEM_PROMPT
-        },
-        {
-          role: 'user' as const,
-          content: `${instruction}\n\n---\n${content}\n---\n\n${MARKDOWN_RESPONSE_DIRECTIVE}`
-        }
-      ],
+      instructions: `${TRANSLATION_SYSTEM_PROMPT}\n\n${instruction}\n\n${MARKDOWN_RESPONSE_DIRECTIVE}`,
+      input: `---\n${content}\n---`,
       temperature: 1,
-      max_completion_tokens: 16384
+      max_output_tokens: 16384
     }
 
     try {
@@ -179,11 +171,11 @@ export class OpenAIProvider implements TranslationProviderAdapter {
         contentLength: content.length
       })
 
-      const response = await this.client.chat.completions.create(requestPayload)
+      const response = await this.client.responses.create(requestPayload) as any
 
-      const finishReason = response.choices?.[0]?.finish_reason
+      const finishReason = response.finish_reason
       const isSuccess = finishReason === 'stop'
-      const text = response.choices?.[0]?.message?.content
+      const text = response.output_text
 
       await logApiResponse({
         timestamp: new Date().toISOString(),
@@ -201,7 +193,6 @@ export class OpenAIProvider implements TranslationProviderAdapter {
 
       this.log.debug('OpenAI response received', {
         model: this.model,
-        choices: response.choices?.length || 0,
         usage: response.usage,
         finishReason: finishReason,
         contentLength: text?.length || 0,
@@ -213,7 +204,7 @@ export class OpenAIProvider implements TranslationProviderAdapter {
           model: this.model,
           finishReason,
           usage: response.usage,
-          maxTokens: requestPayload.max_completion_tokens
+          maxTokens: requestPayload.max_output_tokens
         })
         throw new Error('Response truncated: Token limit exceeded. Consider breaking down the content into smaller pieces.')
       }
@@ -230,11 +221,10 @@ export class OpenAIProvider implements TranslationProviderAdapter {
       if (!text || typeof text !== 'string' || text.trim().length === 0) {
         this.log.error('OpenAI returned empty markdown content', {
           model: this.model,
-          responseChoices: response.choices,
           responseStructure: {
-            hasChoices: !!response.choices,
-            choicesLength: response.choices?.length,
-            firstChoiceMessage: response.choices?.[0]?.message,
+            hasOutputText: !!response.output_text,
+            outputTextLength: response.output_text?.length || 0,
+            finishReason: response.finish_reason,
             fullResponse: JSON.stringify(response, null, 2)
           }
         })
@@ -275,18 +265,10 @@ export class OpenAIProvider implements TranslationProviderAdapter {
   private async sendJsonRequest(instruction: string, data: unknown, _schema: ZodTypeAny | null, context?: JsonRequestContext): Promise<string> {
     const requestPayload = {
       model: this.model,
-      messages: [
-        {
-          role: 'system' as const,
-          content: TRANSLATION_SYSTEM_PROMPT
-        },
-        {
-          role: 'user' as const,
-          content: `${instruction}\n\nInput JSON:\n${stringifyJson(data)}\n\n${JSON_TRANSLATION_WRAPPER_DIRECTIVE}\n${JSON_RESPONSE_DIRECTIVE}`
-        }
-      ],
+      instructions: `${TRANSLATION_SYSTEM_PROMPT}\n\n${instruction}\n\n${JSON_TRANSLATION_WRAPPER_DIRECTIVE}\n${JSON_RESPONSE_DIRECTIVE}`,
+      input: `Input JSON:\n${stringifyJson(data)}`,
       temperature: 1,
-      max_completion_tokens: 16384,
+      max_output_tokens: 16384,
       response_format: {
         type: 'json_object' as const
       }
@@ -299,11 +281,11 @@ export class OpenAIProvider implements TranslationProviderAdapter {
         dataType: jsonType(data)
       })
 
-      const response = await this.client.chat.completions.create(requestPayload)
+      const response = await this.client.responses.create(requestPayload) as any
 
-      const finishReason = response.choices?.[0]?.finish_reason
+      const finishReason = response.finish_reason
       const isSuccess = finishReason === 'stop'
-      const text = response.choices?.[0]?.message?.content
+      const text = response.output_text
 
       await logApiResponse({
         timestamp: new Date().toISOString(),
@@ -321,7 +303,6 @@ export class OpenAIProvider implements TranslationProviderAdapter {
 
       this.log.debug('OpenAI JSON response received', {
         model: this.model,
-        choices: response.choices?.length || 0,
         usage: response.usage,
         finishReason: finishReason,
         contentLength: text?.length || 0,
@@ -333,7 +314,7 @@ export class OpenAIProvider implements TranslationProviderAdapter {
           model: this.model,
           finishReason,
           usage: response.usage,
-          maxTokens: requestPayload.max_completion_tokens
+          maxTokens: requestPayload.max_output_tokens
         })
         throw new Error('JSON response truncated: Token limit exceeded. Consider breaking down the content into smaller pieces.')
       }
@@ -350,11 +331,10 @@ export class OpenAIProvider implements TranslationProviderAdapter {
       if (!text || typeof text !== 'string' || text.trim().length === 0) {
         this.log.error('OpenAI returned empty JSON content', {
           model: this.model,
-          responseChoices: response.choices,
           responseStructure: {
-            hasChoices: !!response.choices,
-            choicesLength: response.choices?.length,
-            firstChoiceMessage: response.choices?.[0]?.message,
+            hasOutputText: !!response.output_text,
+            outputTextLength: response.output_text?.length || 0,
+            finishReason: response.finish_reason,
             fullResponse: JSON.stringify(response, null, 2)
           }
         })

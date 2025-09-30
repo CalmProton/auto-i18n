@@ -1,7 +1,8 @@
 import { Hono } from 'hono'
 import { isSupportedLocale } from '../config/locales'
 import type { ErrorResponse } from '../types'
-import { createContentBatch, submitBatch } from '../services/translation/openaiBatchService'
+import { createBatch, submitBatch } from '../services/translation/openaiBatchService'
+import type { TranslationFileType } from '../types'
 import { createScopedLogger } from '../utils/logger'
 
 const batchRoutes = new Hono()
@@ -17,18 +18,74 @@ batchRoutes.post('/', async (c) => {
 
     const senderId = typeof body.senderId === 'string' ? body.senderId.trim() : ''
     const sourceLocale = typeof body.sourceLocale === 'string' ? body.sourceLocale.trim() : ''
-    const targetLocales = Array.isArray(body.targetLocales)
-      ? body.targetLocales.filter((value): value is string => typeof value === 'string').map((value) => value.trim())
-      : undefined
-    const includeFiles = Array.isArray(body.includeFiles)
-      ? body.includeFiles.filter((value): value is string => typeof value === 'string').map((value) => value.trim())
-      : undefined
+    const targetLocales = (() => {
+      if (Array.isArray(body.targetLocales)) {
+        return body.targetLocales
+          .filter((value): value is string => typeof value === 'string')
+          .map((value) => value.trim())
+          .filter((value) => value.length > 0)
+      }
+      if (typeof body.targetLocales === 'string') {
+        const normalized = body.targetLocales.trim().toLowerCase()
+        if (normalized === 'all') {
+          return 'all' as const
+        }
+        if (normalized.length > 0) {
+          return [normalized]
+        }
+      }
+      return undefined
+    })()
+
+    const includeFiles = (() => {
+      if (Array.isArray(body.includeFiles)) {
+        return body.includeFiles
+          .filter((value): value is string => typeof value === 'string')
+          .map((value) => value.trim())
+          .filter((value) => value.length > 0)
+      }
+      if (typeof body.includeFiles === 'string') {
+        const normalized = body.includeFiles.trim().toLowerCase()
+        if (normalized === 'all') {
+          return 'all' as const
+        }
+        if (normalized.length > 0) {
+          return [normalized]
+        }
+      }
+      return undefined
+    })()
+
+    const types = (() => {
+      const allowedTypes: TranslationFileType[] = ['content', 'global', 'page']
+      const isAllowed = (value: string): value is TranslationFileType =>
+        allowedTypes.includes(value as TranslationFileType)
+      if (Array.isArray(body.types)) {
+        const normalized = body.types
+          .filter((value): value is string => typeof value === 'string')
+          .map((value) => value.trim().toLowerCase())
+          .filter(isAllowed)
+        return normalized.length > 0 ? normalized : undefined
+      }
+      if (typeof body.types === 'string') {
+        const normalized = body.types.trim().toLowerCase()
+        if (normalized === 'all') {
+          return 'all' as const
+        }
+        if (isAllowed(normalized)) {
+          return [normalized]
+        }
+      }
+      return undefined
+    })()
 
     log.info('Received batch creation request', {
       senderId,
       sourceLocale,
-      targetLocales,
-      includeFilesCount: includeFiles?.length
+      targetLocales: targetLocales === 'all' ? 'all' : targetLocales,
+      includeFiles: includeFiles === 'all' ? 'all' : includeFiles,
+      includeFilesCount: includeFiles === 'all' ? 'all' : includeFiles?.length,
+      types: types === 'all' ? 'all' : types
     })
 
     if (!senderId) {
@@ -41,11 +98,12 @@ batchRoutes.post('/', async (c) => {
       return c.json(errorResponse, 400)
     }
 
-    const result = await createContentBatch({
+    const result = await createBatch({
       senderId,
       sourceLocale,
       targetLocales,
-      includeFiles
+      includeFiles,
+      types
     })
 
     return c.json({
