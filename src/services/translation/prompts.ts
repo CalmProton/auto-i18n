@@ -15,21 +15,63 @@ export function buildMarkdownTranslationPrompt(sourceLocale: string, targetLocal
   return `Translate the following Markdown content from ${localeDisplayName(sourceLocale)} (${sourceLocale}) to ${localeDisplayName(targetLocale)} (${targetLocale}).
 
 CRITICAL RULES:
-1. PRESERVE EXACTLY (do not translate or modify):
+
+1. FRONTMATTER HANDLING (MUST BE INCLUDED):
+   - The document ALWAYS starts with YAML frontmatter between --- markers
+   - ALWAYS include the complete frontmatter block in your output
+   - The frontmatter MUST appear at the very beginning of your response
+   
+   TRANSLATE these frontmatter fields:
+   - title: translate the title text
+   - description: translate the description text
+   - category: translate the category name
+   - tags: translate each tag in the array
+   - author: translate author names (e.g., "pxGuru Team" → localized equivalent)
+   - keywords: translate each keyword in the array
+   - difficulty: translate difficulty levels (Beginner/Intermediate/Advanced)
+   
+   DO NOT MODIFY these frontmatter fields (preserve exactly):
+   - publishedDate: keep the ISO date unchanged
+   - modifiedDate: keep the ISO date unchanged
+   - readTime: keep the number unchanged
+   - image: keep the URL/path unchanged
+   - authorUrl: keep the URL unchanged
+   - articleType: keep the technical value unchanged
+
+2. MDC COMPONENT HANDLING:
+   - MDC components use :: syntax (e.g., ::blog-table-of-contents)
+   - ALWAYS preserve the component opening (::component-name) and closing (::) markers
+   - Inside MDC component YAML blocks (between --- markers within components):
+     * TRANSLATE: "text" fields (visible labels)
+     * PRESERVE: "href" fields (anchor links and URLs)
+     * TRANSLATE: other visible content fields (titles, descriptions, labels, etc.)
+     * PRESERVE: technical identifiers, classes, IDs
+   
+   Example structure to maintain:
+   ::blog-table-of-contents
+   ---
+   items:
+   - text: "Translated Text"
+     href: "#unchanged-anchor"
+   ---
+   ::
+
+3. PRESERVE EXACTLY (do not translate or modify):
    - All Markdown syntax and formatting (headers #, lists -, *, links [], images !, etc.)
    - Code blocks and inline code (everything within \`\`\` or \`)
-   - Front matter (everything between --- markers)
    - HTML tags and attributes
-   - URLs and email addresses
+   - URLs and email addresses (including anchor links like #section-name)
    - Variable placeholders (e.g., {{variable}}, {0}, %s, $variable, :variable)
-   - Component names and technical identifiers
-   - Brand names, product names, and trademarked terms unless they have official translations
+   - MDC component names and their :: delimiters
+   - Brand names, product names, and trademarked terms
 
-2. TRANSLATE:
-   - All visible text content, including headings, paragraphs, lists, blockquotes, table content, alt text for images, and link text
-   - In MDC syntax, translate the text portions that will be visible to the user, while preserving the structure. That includes titles, descriptions, body, alt text, link text and other parameters that will be user-facing.
+4. TRANSLATE:
+   - All visible text content, including headings, paragraphs, lists, blockquotes, table content
+   - Alt text for images and link text
+   - MDC component content fields (text, labels, descriptions, titles, etc.)
+   - Frontmatter fields as specified in rule 1
 
-3. TRANSLATION APPROACH:
+5. TRANSLATION APPROACH:
    - Adapt idioms and expressions to natural equivalents in the target language
    - Adjust formality level appropriately for the target culture
    - Localize units of measurement, date formats, and number formats when appearing in prose
@@ -37,11 +79,18 @@ CRITICAL RULES:
    - Ensure technical terminology is translated consistently
    - For UI text, keep translations concise and appropriate for interface elements
 
-4. QUALITY CHECKS:
+6. QUALITY CHECKS:
    - Ensure translations sound natural to native speakers
    - Verify technical terms are industry-standard in the target language
    - Maintain text flow and readability
    - Check that sentence structure follows target language conventions
+
+7. OUTPUT FORMAT REQUIREMENTS:
+   - Start with the complete frontmatter block (--- ... ---)
+   - End with the closing :: of the last MDC component followed by ONE newline
+   - Do NOT add extra dashes (---) at the end of the file
+   - Do NOT add explanatory text before or after the content
+   - Ensure proper spacing: blank line after frontmatter, proper component spacing
 
 Return ONLY the translated Markdown content without any explanations or meta-commentary.`
 }
