@@ -27,6 +27,30 @@ function fixMarkdownFrontmatter(content: string): string {
 }
 
 /**
+ * Unwraps JSON content if it's wrapped in a "translation" key
+ * Some LLMs wrap the translated JSON in { "translation": {...} }
+ * This function extracts the inner content
+ */
+function unwrapJsonTranslation(content: string): string {
+  try {
+    const parsed = JSON.parse(content)
+    
+    // Check if the parsed object has only one key called "translation"
+    const keys = Object.keys(parsed)
+    if (keys.length === 1 && keys[0] === 'translation' && typeof parsed.translation === 'object') {
+      log.debug('Unwrapping JSON content from "translation" wrapper')
+      return JSON.stringify(parsed.translation, null, 2)
+    }
+    
+    // No unwrapping needed
+    return content
+  } catch (error) {
+    log.warn('Failed to parse JSON for unwrapping check', { error })
+    return content
+  }
+}
+
+/**
  * Saves a single translated file to the translations directory
  * Structure: tmp/{senderId}/translations/{targetLocale}/{type}/{relativePath}
  */
@@ -42,6 +66,16 @@ export async function saveTranslatedFile(
   
   // Handle relative path - split and join to normalize
   const pathParts = translation.relativePath.split('/').filter(p => p.length > 0)
+  
+  // For JSON files, replace the source locale filename with target locale
+  if (translation.format === 'json' && pathParts.length > 0) {
+    const lastPart = pathParts[pathParts.length - 1]
+    // Replace en.json (or any locale) with targetLocale.json
+    if (lastPart.endsWith('.json')) {
+      pathParts[pathParts.length - 1] = `${translation.targetLocale}.json`
+    }
+  }
+  
   const filePath = join(localePath, ...pathParts)
   
   // Ensure directory exists
@@ -52,6 +86,11 @@ export async function saveTranslatedFile(
   let contentToSave = translation.translatedContent
   if (translation.format === 'markdown') {
     contentToSave = fixMarkdownFrontmatter(contentToSave)
+  }
+  
+  // Unwrap JSON content if wrapped in "translation" key
+  if (translation.format === 'json') {
+    contentToSave = unwrapJsonTranslation(contentToSave)
   }
   
   // Write the file
