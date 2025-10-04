@@ -4,6 +4,9 @@ import type { ErrorResponse } from '../types'
 import { createBatch, submitBatch } from '../services/translation/openaiBatchService'
 import type { TranslationFileType } from '../types'
 import { createScopedLogger } from '../utils/logger'
+import { processBatchOutput } from '../services/translation/batchOutputProcessor'
+import { formatTranslationsForGithub, getTranslationSummary } from '../services/translation/translationFormatter'
+import { readBatchFile, batchFileExists } from '../utils/batchStorage'
 
 const batchRoutes = new Hono()
 const log = createScopedLogger('routes:batch')
@@ -170,6 +173,96 @@ batchRoutes.post('/:batchId/submit', async (c) => {
       error: message
     }
     return c.json(errorResponse, status)
+  }
+})
+
+/**
+ * Process OpenAI batch output JSONL file
+ * POST /batch/output
+ * Body: { senderId: string, batchId: string, batchOutputId: string }
+ */
+batchRoutes.post('/output', async (c) => {
+  try {
+    const body = (await c.req.json().catch(() => null)) as Record<string, unknown> | null
+
+    const senderId = (body && typeof body.senderId === 'string') ? body.senderId.trim() : ''
+    const batchId = (body && typeof body.batchId === 'string') ? body.batchId.trim() : ''
+    const batchOutputId = (body && typeof body.batchOutputId === 'string') ? body.batchOutputId.trim() : ''
+
+    log.info('Processing batch output', {
+      senderId,
+      batchId,
+      batchOutputId
+    })
+
+    if (!senderId) {
+      const errorResponse: ErrorResponse = { error: 'senderId is required' }
+      return c.json(errorResponse, 400)
+    }
+
+    if (!batchId) {
+      const errorResponse: ErrorResponse = { error: 'batchId is required' }
+      return c.json(errorResponse, 400)
+    }
+
+    if (!batchOutputId) {
+      const errorResponse: ErrorResponse = { error: 'batchOutputId is required' }
+      return c.json(errorResponse, 400)
+    }
+
+    // Step 1: Read the output file using the provided batch output ID
+    const outputFileName = `${batchOutputId}.jsonl`
+    
+    if (!batchFileExists(senderId, batchId, outputFileName)) {
+      const errorResponse: ErrorResponse = { error: `Output file not found: ${outputFileName}` }
+      return c.json(errorResponse, 404)
+    }
+
+    const outputContent = readBatchFile(senderId, batchId, outputFileName)
+
+    // Step 2: Parse batch output and extract translations
+    const translations = await processBatchOutput({
+      senderId,
+      batchId,
+      outputContent
+    })
+
+    // Step 3: Format and save translations to the translations directory
+    const formatResult = await formatTranslationsForGithub({
+      senderId,
+      translations
+    })
+
+    // Step 4: Generate summary statistics
+    const summary = getTranslationSummary(translations)
+
+    return c.json({
+      message: 'Batch output processed successfully',
+      batchId,
+      senderId,
+      totalTranslations: translations.length,
+      savedFiles: formatResult.savedFiles,
+      failedFiles: formatResult.failedFiles,
+      summary: {
+        byLocale: summary.byLocale,
+        byType: summary.byType,
+        totalSuccess: summary.totalSuccess,
+        totalError: summary.totalError
+      },
+      errors: formatResult.errors.map(e => ({
+        customId: e.translation.customId,
+        targetLocale: e.translation.targetLocale,
+        relativePath: e.translation.relativePath,
+        error: e.error instanceof Error ? e.error.message : String(e.error)
+      }))
+    })
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Failed to process batch output'
+    log.error('Failed to process batch output', { error })
+    const errorResponse: ErrorResponse = {
+      error: message
+    }
+    return c.json(errorResponse, 500)
   }
 })
 
