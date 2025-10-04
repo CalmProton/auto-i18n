@@ -260,7 +260,7 @@ function buildMarkdownRequestBody(options: {
       }
     ],
     temperature: 1,
-    max_completion_tokens: 16384
+    max_completion_tokens: 32768
   }
 }
 
@@ -283,7 +283,7 @@ function buildJsonRequestBody(options: {
       }
     ],
     temperature: 1,
-    max_completion_tokens: 16384,
+    max_completion_tokens: 32768,
     response_format: {
       type: 'json_object'
     }

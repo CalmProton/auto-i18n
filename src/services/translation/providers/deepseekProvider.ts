@@ -151,7 +151,7 @@ export class DeepseekProvider implements TranslationProviderAdapter {
           }
         ],
         temperature: 0,
-        max_tokens: 16384
+        max_tokens: 32768
       })
       return this.extractMessageText(response)
     }
@@ -170,7 +170,7 @@ export class DeepseekProvider implements TranslationProviderAdapter {
         }
       ],
       temperature: 0,
-      max_tokens: 16384,
+      max_tokens: 32768,
       response_format: {
         type: 'json_object'
       }

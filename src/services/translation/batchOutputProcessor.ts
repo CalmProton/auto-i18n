@@ -153,9 +153,15 @@ export function extractTranslatedContent(outputLine: BatchOutputLine): string | 
     }
     
     const content = response.body.choices[0]?.message?.content
+    const finishReason = response.body.choices[0]?.finish_reason
     
-    if (!content || typeof content !== 'string') {
-      log.warn('No content in batch output message', { customId: outputLine.custom_id })
+    if (!content || typeof content !== 'string' || content.trim().length === 0) {
+      log.warn('No content in batch output message', { 
+        customId: outputLine.custom_id,
+        finishReason,
+        contentLength: content?.length || 0,
+        hasContent: !!content
+      })
       return null
     }
     
@@ -219,8 +225,18 @@ export async function processBatchOutput(options: {
     
     // Extract and decode content
     const translatedContent = extractTranslatedContent(outputLine)
+    const finishReason = outputLine.response?.body?.choices?.[0]?.finish_reason
     
     if (!translatedContent) {
+      let errorMessage = 'Failed to extract content'
+      
+      // Provide more specific error messages
+      if (finishReason === 'length') {
+        errorMessage = 'Content truncated - exceeded token limit'
+      } else if (outputLine.error) {
+        errorMessage = String(outputLine.error)
+      }
+      
       results.push({
         customId: outputLine.custom_id,
         targetLocale: record.targetLocale,
@@ -231,7 +247,7 @@ export async function processBatchOutput(options: {
         fileName: record.fileName,
         translatedContent: '',
         status: 'error',
-        errorMessage: outputLine.error ? String(outputLine.error) : 'Failed to extract content'
+        errorMessage
       })
       continue
     }

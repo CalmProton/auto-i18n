@@ -141,7 +141,7 @@ export class AnthropicProvider implements TranslationProviderAdapter {
             content: `${instruction}\n\n${expectJson ? 'Input JSON:' : 'Content:'}\n${content}\n\n${expectJson ? JSON_RESPONSE_DIRECTIVE : MARKDOWN_RESPONSE_DIRECTIVE}`
           }
         ],
-        max_tokens: 16384
+        max_tokens: 32768
       })
 
       if (message.stop_reason === 'max_tokens') {

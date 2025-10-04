@@ -161,7 +161,7 @@ export class OpenAIProvider implements TranslationProviderAdapter {
       instructions: `${TRANSLATION_SYSTEM_PROMPT}\n\n${instruction}\n\n${MARKDOWN_RESPONSE_DIRECTIVE}`,
       input: `---\n${content}\n---`,
       temperature: 1,
-      max_output_tokens: 16384
+      max_output_tokens: 32768
     }
 
     try {
@@ -268,7 +268,7 @@ export class OpenAIProvider implements TranslationProviderAdapter {
       instructions: `${TRANSLATION_SYSTEM_PROMPT}\n\n${instruction}\n\n${JSON_TRANSLATION_WRAPPER_DIRECTIVE}\n${JSON_RESPONSE_DIRECTIVE}`,
       input: `Input JSON:\n${stringifyJson(data)}`,
       temperature: 1,
-      max_output_tokens: 16384,
+      max_output_tokens: 32768,
       response_format: {
         type: 'json_object' as const
       }
