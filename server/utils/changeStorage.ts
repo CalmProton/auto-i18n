@@ -29,6 +29,10 @@ export function getChangeDeltaPath(sessionId: string, locale: string): string {
   return join(tempRoot, sanitizeSegment(sessionId), 'deltas', locale)
 }
 
+export function getChangeDeltasPath(sessionId: string): string {
+  return join(tempRoot, sanitizeSegment(sessionId), 'deltas')
+}
+
 /**
  * Load change session metadata
  */

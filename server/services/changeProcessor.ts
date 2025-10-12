@@ -84,12 +84,31 @@ export async function processChanges(
   // Process each change
   for (const change of request.changes) {
     try {
-      const file = files.get(change.path)
+      // Try to find the file - first by exact path, then by sanitized path
+      let file = files.get(change.path)
+      
+      // If not found, try sanitized version (workflow sanitizes paths for form field names)
+      if (!file && change.changeType !== 'deleted') {
+        const sanitizedPath = change.path
+          .replace(/\//g, '_')
+          .toLowerCase()
+          .replace(/[^a-z0-9_]/g, '_')
+        file = files.get(sanitizedPath)
+        
+        if (file) {
+          log.info('Found file using sanitized path', {
+            sessionId: request.sessionId,
+            originalPath: change.path,
+            sanitizedPath
+          })
+        }
+      }
       
       if (!file && change.changeType !== 'deleted') {
         log.warn('File not found for change', { 
           sessionId: request.sessionId, 
-          path: change.path 
+          path: change.path,
+          availableKeys: Array.from(files.keys())
         })
         continue
       }
@@ -141,7 +160,7 @@ export async function processChanges(
               request.sessionId,
               request.sourceLocale,
               change.type,
-              relativePath.replace('.json', '-delta.json'),
+              relativePath.replace('.json', '.delta.json'),
               delta
             )
             processedChange.deltaPath = deltaPath

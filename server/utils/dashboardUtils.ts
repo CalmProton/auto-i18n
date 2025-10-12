@@ -298,8 +298,17 @@ export function getBatchInfo(senderId: string, batchId: string): Batch | null {
     const outputProcessed = manifest.status === 'completed' && hasOutput
 
     // Get repository name from sender metadata
-    const metadataPath = join(TMP_DIR, senderId, 'metadata.json')
-    const metadata = readJsonFile<TranslationMetadataFile>(metadataPath)
+    // Try change session metadata first, then fall back to regular upload metadata
+    const changeMetadataPath = join(TMP_DIR, senderId, 'changes', 'metadata.json')
+    const uploadMetadataPath = join(TMP_DIR, senderId, 'metadata.json')
+    
+    let metadata: TranslationMetadataFile | null = null
+    if (existsSync(changeMetadataPath)) {
+      metadata = readJsonFile<TranslationMetadataFile>(changeMetadataPath)
+    } else if (existsSync(uploadMetadataPath)) {
+      metadata = readJsonFile<TranslationMetadataFile>(uploadMetadataPath)
+    }
+    
     const repositoryName = metadata?.repository ? `${metadata.repository.owner}/${metadata.repository.name}` : undefined
 
     // Determine actual status based on errors and presence of files

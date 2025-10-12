@@ -163,14 +163,20 @@ jobs:
           
           echo "Uploading changes to $REQUEST_URL"
           
-          # Prepare curl command with files
-          CURL_CMD="curl --fail-with-body --silent --show-error -X POST \"$REQUEST_URL\""
-          CURL_CMD="$CURL_CMD --form-string \"sessionId=$SESSION_ID\""
-          CURL_CMD="$CURL_CMD --form-string \"sourceLocale=$SOURCE_LOCALE\""
-          CURL_CMD="$CURL_CMD --form-string \"automationMode=$AUTOMATION_MODE\""
-          CURL_CMD="$CURL_CMD --form-string \"targetLocales=[$TARGET_LOCALE_JSON]\""
-          CURL_CMD="$CURL_CMD --form-string \"repository=$REPO_JSON\""
-          CURL_CMD="$CURL_CMD --form-string \"changes=[$CHANGES_JSON]\""
+          # Build curl args array to avoid shell escaping issues
+          CURL_ARGS=(
+            --fail-with-body
+            --silent
+            --show-error
+            -X POST
+            "$REQUEST_URL"
+            --form-string "sessionId=$SESSION_ID"
+            --form-string "sourceLocale=$SOURCE_LOCALE"
+            --form-string "automationMode=$AUTOMATION_MODE"
+            --form-string "targetLocales=[$TARGET_LOCALE_JSON]"
+            --form-string "repository=$REPO_JSON"
+            --form-string "changes=[$CHANGES_JSON]"
+          )
           
           # Add files that are not deleted
           while IFS= read -r FILE; do
@@ -182,12 +188,12 @@ jobs:
             if [ "$STATUS" != "D" ] && [ -f "$FILE" ]; then
               # Sanitize path for field name
               FIELD=$(echo "$FILE" | tr '/' '_' | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9_]/_/g')
-              CURL_CMD="$CURL_CMD -F \"$FIELD=@$FILE\""
+              CURL_ARGS+=(-F "$FIELD=@$FILE")
             fi
           done < changed_files.txt
           
           # Execute curl command
-          eval $CURL_CMD
+          curl "${CURL_ARGS[@]}"
           
           echo "Changes uploaded successfully!"
 
