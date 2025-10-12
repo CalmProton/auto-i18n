@@ -25,7 +25,7 @@ app.use(authMiddleware)
 // Mount all routes (protected by auth middleware)
 app.use(routes)
 
-const PORT = process.env.PORT || 3001
+const PORT = process.env.PORT || 3000
 
 app.listen(PORT)
 

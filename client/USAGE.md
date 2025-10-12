@@ -90,7 +90,7 @@ The Vue client uses:
 
 API requests are proxied through Vite's dev server:
 - Client makes request to `/translate/content`
-- Vite forwards to `http://localhost:3001/translate/content`
+- Vite forwards to `http://localhost:3000/translate/content`
 - Response returns through the proxy
 
 ## Development

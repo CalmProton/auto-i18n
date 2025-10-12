@@ -15,11 +15,11 @@ export default defineConfig({
     port: 5173,
     proxy: {
       '/translate': {
-        target: 'http://localhost:3001',
+        target: 'http://localhost:3000',
         changeOrigin: true,
       },
       '/github': {
-        target: 'http://localhost:3001',
+        target: 'http://localhost:3000',
         changeOrigin: true,
       },
     },

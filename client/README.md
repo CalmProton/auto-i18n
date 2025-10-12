@@ -10,7 +10,7 @@ In one terminal:
 bun run dev
 ```
 
-This starts the API server on `http://localhost:3001`
+This starts the API server on `http://localhost:3000`
 
 ### 2. Start the Vue Client
 

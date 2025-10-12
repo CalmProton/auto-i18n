@@ -10,7 +10,7 @@ Auto-i18n receives localization artifacts from CI pipelines, stores them in a te
 bun run dev
 ```
 
-The API server runs on `http://localhost:3001` (configurable via `PORT` environment variable).
+The API server runs on `http://localhost:3000` (configurable via `PORT` environment variable).
 
 ### Start the Vue Client (Optional)
 

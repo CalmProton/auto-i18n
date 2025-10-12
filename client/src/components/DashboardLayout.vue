@@ -67,22 +67,13 @@ import StatsOverview from './StatsOverview.vue'
 import UploadsTab from './UploadsTab.vue'
 import BatchesTab from './BatchesTab.vue'
 import TranslationsTab from './TranslationsTab.vue'
+import GitHubTab from './GitHubTab.vue'
 import ToastContainer from './ToastContainer.vue'
-// GitHubTab will be imported next
 // import TranslationsTab from './TranslationsTab.vue'
 // import GitHubTab from './GitHubTab.vue'
 
 const { isAuthenticated, logout } = useAuth()
 const activeTab = ref('uploads')
-
-// Placeholder components for tabs not yet implemented
-const PlaceholderTab = {
-  template: `
-    <div class="flex items-center justify-center h-64 border-2 border-dashed rounded-lg">
-      <p class="text-muted-foreground">This tab is coming soon...</p>
-    </div>
-  `
-}
 
 const currentTabComponent = computed(() => {
   switch (activeTab.value) {
@@ -93,7 +84,7 @@ const currentTabComponent = computed(() => {
     case 'translations':
       return TranslationsTab
     case 'github':
-      return PlaceholderTab // GitHubTab - coming next
+      return GitHubTab
     default:
       return UploadsTab
   }
