@@ -5,9 +5,10 @@
 
 import { ref, computed } from 'vue'
 import { api } from '../lib/api-client'
-import type { SystemStats, LocalesResponse } from '../types/api'
+import type { SystemStats, LocalesResponse, DashboardOverview } from '../types/api'
 
-const stats = ref<SystemStats | null>(null)
+const stats = ref<DashboardOverview | null>(null)
+const systemStats = ref<SystemStats | null>(null)
 const locales = ref<string[]>([])
 const defaultLocale = ref<string>('en')
 const loading = ref(false)
@@ -15,15 +16,34 @@ const error = ref<string | null>(null)
 
 export function useSystem() {
   /**
-   * Fetch system statistics
+   * Fetch dashboard overview statistics
    */
   async function fetchStats(): Promise<void> {
     loading.value = true
     error.value = null
 
     try {
-      const response = await api.get<SystemStats>('/api/system/stats')
+      const response = await api.get<DashboardOverview>('/api/dashboard/overview')
       stats.value = response
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to fetch dashboard stats'
+      error.value = message
+      console.error('Failed to fetch dashboard stats:', err)
+    } finally {
+      loading.value = false
+    }
+  }
+
+  /**
+   * Fetch system configuration and stats
+   */
+  async function fetchSystemStats(): Promise<void> {
+    loading.value = true
+    error.value = null
+
+    try {
+      const response = await api.get<SystemStats>('/api/system/stats')
+      systemStats.value = response
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to fetch system stats'
       error.value = message
@@ -70,9 +90,9 @@ export function useSystem() {
    * Get configured providers
    */
   function getConfiguredProviders(): string[] {
-    if (!stats.value) return []
+    if (!systemStats.value) return []
     
-    return Object.entries(stats.value.providers)
+    return Object.entries(systemStats.value.providers)
       .filter(([_, config]) => config.configured)
       .map(([name]) => name)
   }
@@ -81,26 +101,27 @@ export function useSystem() {
    * Check if a provider is configured
    */
   function isProviderConfigured(provider: 'openai' | 'anthropic' | 'deepseek'): boolean {
-    return stats.value?.providers[provider]?.configured ?? false
+    return systemStats.value?.providers[provider]?.configured ?? false
   }
 
   /**
    * Check if GitHub is configured
    */
   function isGitHubConfigured(): boolean {
-    return stats.value?.github?.configured ?? false
+    return systemStats.value?.github?.configured ?? false
   }
 
   /**
    * Initialize system data
    */
   async function initialize(): Promise<void> {
-    await Promise.all([fetchStats(), fetchLocales()])
+    await Promise.all([fetchStats(), fetchSystemStats(), fetchLocales()])
   }
 
   return {
     // State
     stats: computed(() => stats.value),
+    systemStats: computed(() => systemStats.value),
     locales: computed(() => locales.value),
     defaultLocale: computed(() => defaultLocale.value),
     loading: computed(() => loading.value),
@@ -108,6 +129,7 @@ export function useSystem() {
 
     // Actions
     fetchStats,
+    fetchSystemStats,
     fetchLocales,
     initialize,
 
