@@ -65,9 +65,10 @@ import { Button } from '@/components/ui/button'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import StatsOverview from './StatsOverview.vue'
 import UploadsTab from './UploadsTab.vue'
+import BatchesTab from './BatchesTab.vue'
+import TranslationsTab from './TranslationsTab.vue'
 import ToastContainer from './ToastContainer.vue'
-// Import other tabs when created
-// import BatchesTab from './BatchesTab.vue'
+// GitHubTab will be imported next
 // import TranslationsTab from './TranslationsTab.vue'
 // import GitHubTab from './GitHubTab.vue'
 
@@ -88,11 +89,11 @@ const currentTabComponent = computed(() => {
     case 'uploads':
       return UploadsTab
     case 'batches':
-      return PlaceholderTab // BatchesTab
+      return BatchesTab
     case 'translations':
-      return PlaceholderTab // TranslationsTab
+      return TranslationsTab
     case 'github':
-      return PlaceholderTab // GitHubTab
+      return PlaceholderTab // GitHubTab - coming next
     default:
       return UploadsTab
   }
