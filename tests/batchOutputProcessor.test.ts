@@ -4,7 +4,7 @@ import {
   parseBatchOutputLine,
   parseCustomId,
   extractTranslatedContent
-} from '../src/services/translation/batchOutputProcessor'
+} from '../server/services/translation/batchOutputProcessor'
 
 describe('batchOutputProcessor', () => {
   describe('decodeUnicodeEscapes', () => {

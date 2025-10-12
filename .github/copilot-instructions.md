@@ -2,12 +2,12 @@
 
 ## Startup & tooling
 
-- Runtime is Bun; install deps with `bun install` and run the API with `bun run --hot src/index.ts` (Hono listens on port 3000 by default).
-- Routes live under `src/routes`; add new endpoints by registering them in `routes/index.ts` and returning `FileUploadResponse`/`ErrorResponse` shapes from `src/types`.
+- Runtime is Bun; install deps with `bun install` and run the API with `bun run --hot server/index.ts` (Hono listens on port 3000 by default).
+- Routes live under `server/routes`; add new endpoints by registering them in `routes/index.ts` and returning `FileUploadResponse`/`ErrorResponse` shapes from `server/types`.
 
 ## Architecture snapshot
 
-- `src/index.ts` boots a Hono app and mounts grouped route modules (`content`, `global`, `page`, `github`).
+- `server/index.ts` boots a Hono app and mounts grouped route modules (`content`, `global`, `page`, `github`).
 - Upload handlers call `services/fileProcessor` to persist files under `tmp/<senderId>/uploads/<locale>/<type>` and enqueue translation triggers via `services/translation/*`.
 - `utils/fileValidation` parses multipart payloads, validates locales via `config/locales`, and normalizes folder structure (see `deriveFolderInfoFromField`).
 - Metadata from requests is merged with `tmp/<senderId>/metadata.json` through `utils/metadataInput` and `utils/jobMetadata`; always keep descriptor counts aligned with the actual uploads.
