@@ -2,13 +2,13 @@ import { beforeAll, afterAll, describe, expect, it } from 'bun:test'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { SUPPORTED_LOCALES } from '../server/config/locales'
+import { SUPPORTED_LOCALES } from '@server/config/locales'
 
-type EnvModule = typeof import('../server/config/env')
+type EnvModule = typeof import('@server/config/env')
 
-type FileStorageModule = typeof import('../server/utils/fileStorage')
+type FileStorageModule = typeof import('@server/utils/fileStorage')
 
-type BatchServiceModule = typeof import('../server/services/translation/openaiBatchService')
+type BatchServiceModule = typeof import('@server/services/translation/openaiBatchService')
 
 let tempDir: string
 let envModule: EnvModule
@@ -22,11 +22,11 @@ beforeAll(async () => {
   process.env.OPENAI_API_KEY = 'test-api-key'
   delete process.env.OPENAI_MODEL
 
-  envModule = await import('../server/config/env')
+  envModule = await import('@server/config/env')
   envModule.resetTranslationConfigCache()
 
-  fileStorageModule = await import('../server/utils/fileStorage')
-  batchServiceModule = await import('../server/services/translation/openaiBatchService')
+  fileStorageModule = await import('@server/utils/fileStorage')
+  batchServiceModule = await import('@server/services/translation/openaiBatchService')
 })
 
 afterAll(() => {

@@ -22,7 +22,9 @@
     "resolveJsonModule": true,
     "baseUrl": ".",
     "paths": {
-      "@/*": ["./client/src/*"]
+      "@/*": ["./client/src/*"],
+      "@client/*": ["./client/src/*"],
+      "@server/*": ["./server/*"]
     }
   }
 }
