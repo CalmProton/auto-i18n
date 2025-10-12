@@ -576,3 +576,156 @@ export async function submitBatch(options: SubmitBatchOptions): Promise<SubmitBa
     inputFileId: fileResponse.id
   }
 }
+
+export interface CreateRetryBatchOptions {
+  senderId: string
+  originalBatchId: string
+  errorFileName: string
+  model?: string
+}
+
+export interface CreateRetryBatchResult {
+  batchId: string
+  requestCount: number
+  failedRequestCount: number
+  manifest: BatchManifest
+  inputFilePath: string
+}
+
+/**
+ * Creates a new batch from failed requests in an error JSONL file
+ */
+export async function createRetryBatch(options: CreateRetryBatchOptions): Promise<CreateRetryBatchResult> {
+  const { senderId, originalBatchId, errorFileName, model: overrideModel } = options
+
+  // Load the original manifest to get context
+  const originalManifest = loadManifest(senderId, originalBatchId)
+
+  // Determine the model to use
+  const { model: defaultModel } = getOpenAIProviderInfo()
+  const model = overrideModel ?? defaultModel
+
+  // Read the error file
+  if (!batchFileExists(senderId, originalBatchId, errorFileName)) {
+    throw new Error(`Error file ${errorFileName} not found for batch ${originalBatchId}`)
+  }
+  const errorContent = readBatchFile(senderId, originalBatchId, errorFileName)
+
+  // Parse error file to extract failed custom_ids
+  const errorLines = errorContent.trim().split('\n').filter((line) => line.trim().length > 0)
+  const failedCustomIds = new Set<string>()
+
+  for (const line of errorLines) {
+    try {
+      const errorRecord = JSON.parse(line)
+      if (errorRecord.custom_id) {
+        failedCustomIds.add(errorRecord.custom_id)
+      }
+    } catch (error) {
+      log.warn('Failed to parse error record line', { line, error })
+    }
+  }
+
+  if (failedCustomIds.size === 0) {
+    throw new Error('No failed requests found in error file')
+  }
+
+  log.info('Extracted failed request IDs', {
+    senderId,
+    originalBatchId,
+    errorFileName,
+    failedCount: failedCustomIds.size
+  })
+
+  // Read the original input file to extract the failed requests
+  if (!batchFileExists(senderId, originalBatchId, INPUT_FILE_NAME)) {
+    throw new Error(`Original input file not found for batch ${originalBatchId}`)
+  }
+  const originalInputContent = readBatchFile(senderId, originalBatchId, INPUT_FILE_NAME)
+  const originalInputLines = originalInputContent.trim().split('\n').filter((line) => line.trim().length > 0)
+
+  interface OriginalBatchRequest {
+    custom_id: string
+    method: string
+    url: string
+    body: OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming
+  }
+
+  const failedRequests: OriginalBatchRequest[] = []
+
+  for (const line of originalInputLines) {
+    try {
+      const request = JSON.parse(line) as OriginalBatchRequest
+      if (failedCustomIds.has(request.custom_id)) {
+        failedRequests.push(request)
+      }
+    } catch (error) {
+      log.warn('Failed to parse original input line', { line, error })
+    }
+  }
+
+  if (failedRequests.length === 0) {
+    throw new Error('Could not find any matching failed requests in the original input file')
+  }
+
+  log.info('Found matching failed requests', {
+    senderId,
+    originalBatchId,
+    matchedCount: failedRequests.length,
+    requestedCount: failedCustomIds.size
+  })
+
+  // Update the model in each request if override is specified
+  const updatedRequests = failedRequests.map((request) => ({
+    ...request,
+    body: {
+      ...request.body,
+      model
+    }
+  }))
+
+  // Create new batch ID
+  const newBatchId = `batch_${sanitizeBatchSegment(originalManifest.sourceLocale)}_${Date.now()}_${randomUUID().slice(0, 8)}`
+
+  // Serialize and save the new input file
+  const newInputContent = updatedRequests.map((request) => JSON.stringify(request)).join('\n')
+  const inputFilePath = writeBatchFile(senderId, newBatchId, INPUT_FILE_NAME, newInputContent)
+
+  // Build the new manifest based on original, filtering to only failed requests
+  const failedFileRecords = originalManifest.files.filter((file) => failedCustomIds.has(file.customId))
+
+  const newManifest: BatchManifest = {
+    batchId: newBatchId,
+    senderId,
+    types: originalManifest.types,
+    sourceLocale: originalManifest.sourceLocale,
+    targetLocales: originalManifest.targetLocales,
+    model,
+    totalRequests: updatedRequests.length,
+    files: failedFileRecords,
+    status: 'draft',
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  }
+
+  saveManifest(senderId, newBatchId, newManifest)
+
+  log.info('Created retry batch from failed requests', {
+    senderId,
+    originalBatchId,
+    newBatchId,
+    errorFileName,
+    model,
+    failedCount: failedCustomIds.size,
+    retryRequestCount: updatedRequests.length,
+    inputFilePath
+  })
+
+  return {
+    batchId: newBatchId,
+    requestCount: updatedRequests.length,
+    failedRequestCount: failedCustomIds.size,
+    manifest: newManifest,
+    inputFilePath
+  }
+}

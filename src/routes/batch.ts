@@ -1,7 +1,7 @@
 import { Hono } from 'hono'
 import { isSupportedLocale } from '../config/locales'
 import type { ErrorResponse } from '../types'
-import { createBatch, submitBatch } from '../services/translation/openaiBatchService'
+import { createBatch, submitBatch, createRetryBatch } from '../services/translation/openaiBatchService'
 import type { TranslationFileType } from '../types'
 import { createScopedLogger } from '../utils/logger'
 import { processBatchOutput } from '../services/translation/batchOutputProcessor'
@@ -263,6 +263,72 @@ batchRoutes.post('/output', async (c) => {
       error: message
     }
     return c.json(errorResponse, 500)
+  }
+})
+
+/**
+ * Create a retry batch from failed requests in an error file
+ * POST /batch/retry
+ * Body: { senderId: string, originalBatchId: string, errorFileName: string, model?: string }
+ */
+batchRoutes.post('/retry', async (c) => {
+  try {
+    const body = (await c.req.json().catch(() => null)) as Record<string, unknown> | null
+
+    const senderId = (body && typeof body.senderId === 'string') ? body.senderId.trim() : ''
+    const originalBatchId = (body && typeof body.originalBatchId === 'string') ? body.originalBatchId.trim() : ''
+    const errorFileName = (body && typeof body.errorFileName === 'string') ? body.errorFileName.trim() : ''
+    const model = (body && typeof body.model === 'string') ? body.model.trim() : undefined
+
+    log.info('Creating retry batch from failed requests', {
+      senderId,
+      originalBatchId,
+      errorFileName,
+      model
+    })
+
+    if (!senderId) {
+      const errorResponse: ErrorResponse = { error: 'senderId is required' }
+      return c.json(errorResponse, 400)
+    }
+
+    if (!originalBatchId) {
+      const errorResponse: ErrorResponse = { error: 'originalBatchId is required' }
+      return c.json(errorResponse, 400)
+    }
+
+    if (!errorFileName) {
+      const errorResponse: ErrorResponse = { error: 'errorFileName is required' }
+      return c.json(errorResponse, 400)
+    }
+
+    const result = await createRetryBatch({
+      senderId,
+      originalBatchId,
+      errorFileName,
+      model
+    })
+
+    return c.json({
+      message: 'Retry batch created successfully',
+      batchId: result.batchId,
+      originalBatchId,
+      requestCount: result.requestCount,
+      failedRequestCount: result.failedRequestCount,
+      model: result.manifest.model,
+      manifest: result.manifest
+    }, 201)
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Failed to create retry batch'
+    const status = error instanceof Error && (
+      message.toLowerCase().includes('not found') ||
+      message.toLowerCase().includes('no failed requests')
+    ) ? 404 : 500
+    log.error('Failed to create retry batch', { error, status })
+    const errorResponse: ErrorResponse = {
+      error: message
+    }
+    return c.json(errorResponse, status)
   }
 })
 

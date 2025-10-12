@@ -9,7 +9,9 @@ export const TRANSLATION_SYSTEM_PROMPT = `You are an expert localization special
 - Accurate while adapting to local conventions (dates, numbers, currency, units)
 - Consistent in tone, formality level, and style
 - Mindful of the target audience and regional variations
-- Professional and suitable for production use`
+- Professional and suitable for production use
+- Sensitive to context, avoiding literal translations that may confuse or mislead
+- Accurate with technical terminology and industry jargon`
 
 export function buildMarkdownTranslationPrompt(sourceLocale: string, targetLocale: string): string {
   return `Translate the following Markdown content from ${localeDisplayName(sourceLocale)} (${sourceLocale}) to ${localeDisplayName(targetLocale)} (${targetLocale}).
@@ -27,12 +29,12 @@ CRITICAL RULES:
    - category: translate the category name
    - tags: translate each tag in the array
    - author: translate author names (e.g., "pxGuru Team" → localized equivalent)
-   - keywords: translate each keyword in the array
    - difficulty: translate difficulty levels (Beginner/Intermediate/Advanced)
    
    DO NOT MODIFY these frontmatter fields (preserve exactly):
    - publishedDate: keep the ISO date unchanged
    - modifiedDate: keep the ISO date unchanged
+   - categoryKey: keep the technical value unchanged
    - readTime: keep the number unchanged
    - image: keep the URL/path unchanged
    - authorUrl: keep the URL unchanged
