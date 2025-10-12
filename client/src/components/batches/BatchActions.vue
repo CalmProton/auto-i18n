@@ -5,7 +5,8 @@
       size="sm"
       @click="$emit('toggleExpand')"
     >
-      {{ isExpanded ? '▼' : '▶' }} Details
+      <Icon :icon="isExpanded ? 'mdi:chevron-down' : 'mdi:chevron-right'" :size="20" class="mr-1" />
+      Details
     </Button>
     
     <Button
@@ -15,7 +16,8 @@
       @click="handleRefresh"
       :disabled="isRefreshing"
     >
-      {{ isRefreshing ? 'Refreshing...' : '🔄 Refresh Status' }}
+      <Icon v-if="!isRefreshing" icon="mdi:refresh" :size="18" class="mr-1" />
+      {{ isRefreshing ? 'Refreshing...' : 'Refresh Status' }}
     </Button>
     
     <Button
@@ -25,7 +27,8 @@
       @click="handleProcess"
       :disabled="isProcessing"
     >
-      {{ isProcessing ? 'Processing...' : '⚙️ Process Output' }}
+      <Icon v-if="!isProcessing" icon="mdi:cog" :size="18" class="mr-1" />
+      {{ isProcessing ? 'Processing...' : 'Process Output' }}
     </Button>
     
     <Button
@@ -35,7 +38,8 @@
       @click="handleRetry"
       :disabled="isRetrying"
     >
-      {{ isRetrying ? 'Creating...' : '🔁 Retry Failed' }}
+      <Icon v-if="!isRetrying" icon="mdi:reload" :size="18" class="mr-1" />
+      {{ isRetrying ? 'Creating...' : 'Retry Failed' }}
     </Button>
     
     <Button
@@ -44,7 +48,8 @@
       @click="handleDelete"
       :disabled="isDeleting"
     >
-      {{ isDeleting ? 'Deleting...' : '🗑️ Delete' }}
+      <Icon v-if="!isDeleting" icon="mdi:delete" :size="18" class="mr-1" />
+      {{ isDeleting ? 'Deleting...' : 'Delete' }}
     </Button>
   </div>
 </template>
@@ -53,6 +58,7 @@
 import { ref, computed } from 'vue'
 import { useBatches, useToast } from '@/composables'
 import { Button } from '@/components/ui/button'
+import Icon from '../Icon.vue'
 import type { Batch } from '@/types/api'
 
 const props = defineProps<{

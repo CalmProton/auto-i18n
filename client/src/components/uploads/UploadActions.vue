@@ -5,7 +5,8 @@
       size="sm"
       @click="$emit('toggleExpand')"
     >
-      {{ isExpanded ? '▼' : '▶' }} Files
+      <Icon :icon="isExpanded ? 'mdi:chevron-down' : 'mdi:chevron-right'" :size="20" class="mr-1" />
+      Files
     </Button>
     
     <Button
@@ -15,7 +16,8 @@
       @click="handleTriggerTranslation"
       :disabled="isTriggering"
     >
-      {{ isTriggering ? 'Starting...' : '🚀 Trigger Translation' }}
+      <Icon v-if="!isTriggering" icon="mdi:rocket-launch" :size="18" class="mr-1" />
+      {{ isTriggering ? 'Starting...' : 'Trigger Translation' }}
     </Button>
     
     <Button
@@ -24,7 +26,8 @@
       size="sm"
       @click="handleCreatePR"
     >
-      🔀 Create PR
+      <Icon icon="mdi:source-pull" :size="18" class="mr-1" />
+      Create PR
     </Button>
     
     <Button
@@ -33,7 +36,8 @@
       @click="handleCreateBatch"
       :disabled="isCreatingBatch"
     >
-      {{ isCreatingBatch ? 'Creating...' : '📦 Create Batch' }}
+      <Icon v-if="!isCreatingBatch" icon="mdi:package-variant-closed" :size="18" class="mr-1" />
+      {{ isCreatingBatch ? 'Creating...' : 'Create Batch' }}
     </Button>
     
     <Button
@@ -42,7 +46,8 @@
       @click="handleDelete"
       :disabled="isDeleting"
     >
-      {{ isDeleting ? 'Deleting...' : '🗑️ Delete' }}
+      <Icon v-if="!isDeleting" icon="mdi:delete" :size="18" class="mr-1" />
+      {{ isDeleting ? 'Deleting...' : 'Delete' }}
     </Button>
   </div>
 </template>
@@ -51,6 +56,7 @@
 import { ref } from 'vue'
 import { useUploads, useToast } from '@/composables'
 import { Button } from '@/components/ui/button'
+import Icon from '../Icon.vue'
 import type { Upload } from '@/types/api'
 
 const props = defineProps<{

@@ -61,7 +61,10 @@
         <!-- System Status -->
         <div class="space-y-2">
           <p class="text-sm font-medium text-muted-foreground">System Status</p>
-          <p class="text-lg font-semibold text-green-600">● Operational</p>
+          <p class="text-lg font-semibold text-green-600 flex items-center gap-2">
+            <Icon icon="mdi:circle" :size="16" color="#22c55e" />
+            Operational
+          </p>
         </div>
       </div>
       

@@ -43,21 +43,33 @@
         <div class="font-medium text-sm">Files</div>
         <div class="space-y-1">
           <div class="flex items-center justify-between p-2 rounded hover:bg-gray-100 dark:hover:bg-gray-800 text-sm">
-            <span>📄 Input</span>
-            <span :class="batchDetail.files.input.exists ? 'text-green-600' : 'text-gray-400'">
-              {{ batchDetail.files.input.exists ? '✓ Available' : '✗ Not found' }}
+            <span class="flex items-center gap-1">
+              <Icon icon="mdi:file-document" :size="16" />
+              Input
+            </span>
+            <span :class="batchDetail.files.input.exists ? 'text-green-600' : 'text-gray-400'" class="flex items-center gap-1">
+              <Icon :icon="batchDetail.files.input.exists ? 'mdi:check' : 'mdi:close'" :size="16" />
+              {{ batchDetail.files.input.exists ? 'Available' : 'Not found' }}
             </span>
           </div>
           <div class="flex items-center justify-between p-2 rounded hover:bg-gray-100 dark:hover:bg-gray-800 text-sm">
-            <span>📥 Output</span>
-            <span :class="batchDetail.files.output.exists ? 'text-green-600' : 'text-gray-400'">
-              {{ batchDetail.files.output.exists ? '✓ Available' : '✗ Not found' }}
+            <span class="flex items-center gap-1">
+              <Icon icon="mdi:file-download" :size="16" />
+              Output
+            </span>
+            <span :class="batchDetail.files.output.exists ? 'text-green-600' : 'text-gray-400'" class="flex items-center gap-1">
+              <Icon :icon="batchDetail.files.output.exists ? 'mdi:check' : 'mdi:close'" :size="16" />
+              {{ batchDetail.files.output.exists ? 'Available' : 'Not found' }}
             </span>
           </div>
           <div class="flex items-center justify-between p-2 rounded hover:bg-gray-100 dark:hover:bg-gray-800 text-sm">
-            <span>❌ Errors</span>
-            <span :class="batchDetail.files.error.exists ? 'text-red-600' : 'text-gray-400'">
-              {{ batchDetail.files.error.exists ? `✓ ${batchDetail.files.error.errorCount || 0} errors` : '✗ None' }}
+            <span class="flex items-center gap-1">
+              <Icon icon="mdi:alert-circle" :size="16" />
+              Errors
+            </span>
+            <span :class="batchDetail.files.error.exists ? 'text-red-600' : 'text-gray-400'" class="flex items-center gap-1">
+              <Icon :icon="batchDetail.files.error.exists ? 'mdi:check' : 'mdi:close'" :size="16" />
+              {{ batchDetail.files.error.exists ? `${batchDetail.files.error.errorCount || 0} errors` : 'None' }}
             </span>
           </div>
         </div>
@@ -121,6 +133,7 @@
 import { onMounted } from 'vue'
 import { useBatches } from '@/composables'
 import { Alert, AlertDescription } from '@/components/ui/alert'
+import Icon from '../Icon.vue'
 
 const props = defineProps<{
   batchId: string

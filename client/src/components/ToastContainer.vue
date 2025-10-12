@@ -15,9 +15,9 @@
             </div>
             <button
               @click="removeToast(toast.id)"
-              class="text-current opacity-70 hover:opacity-100 transition-opacity"
+              class="text-current opacity-70 hover:opacity-100 transition-opacity flex items-center"
             >
-              ✕
+              <Icon icon="mdi:close" :size="18" />
             </button>
           </div>
         </AlertDescription>
@@ -29,6 +29,7 @@
 <script setup lang="ts">
 import { useToast } from '@/composables'
 import { Alert, AlertDescription } from '@/components/ui/alert'
+import Icon from './Icon.vue'
 import type { ToastType } from '@/composables/useToast'
 
 const { toasts, dismiss } = useToast()

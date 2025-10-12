@@ -2,7 +2,10 @@
   <div v-if="!isAuthenticated" class="min-h-screen bg-background flex items-center justify-center p-6">
     <Card class="w-full max-w-md">
       <CardHeader>
-        <CardTitle>🔐 Authentication Required</CardTitle>
+        <CardTitle class="flex items-center gap-2">
+          <Icon icon="mdi:lock" :size="24" />
+          Authentication Required
+        </CardTitle>
         <CardDescription>
           {{ authRequired ? 'Enter your access key to continue' : 'Checking authentication...' }}
         </CardDescription>
@@ -39,6 +42,7 @@
 import { ref, onMounted } from 'vue'
 import { useAuth } from '@/composables'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import Icon from './Icon.vue'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Button } from '@/components/ui/button'

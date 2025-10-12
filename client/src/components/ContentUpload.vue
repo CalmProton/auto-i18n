@@ -1,7 +1,10 @@
 <template>
   <Card class="mb-6">
     <CardHeader>
-      <CardTitle>📄 Upload Content Files</CardTitle>
+      <CardTitle class="flex items-center gap-2">
+        <Icon icon="mdi:file-document-multiple" :size="24" />
+        Upload Content Files
+      </CardTitle>
       <CardDescription>Upload markdown content files for translation</CardDescription>
     </CardHeader>
     <CardContent>
@@ -59,14 +62,20 @@
       </form>
 
       <Alert v-if="response" class="mt-4">
-        <AlertTitle>✅ Upload Successful</AlertTitle>
+        <AlertTitle class="flex items-center gap-2">
+          <Icon icon="mdi:check-circle" :size="20" color="#22c55e" />
+          Upload Successful
+        </AlertTitle>
         <AlertDescription>
           <pre class="mt-2 text-xs overflow-x-auto">{{ JSON.stringify(response, null, 2) }}</pre>
         </AlertDescription>
       </Alert>
 
       <Alert v-if="error" variant="destructive" class="mt-4">
-        <AlertTitle>❌ Error</AlertTitle>
+        <AlertTitle class="flex items-center gap-2">
+          <Icon icon="mdi:close-circle" :size="20" />
+          Error
+        </AlertTitle>
         <AlertDescription>
           <pre class="mt-2 text-xs overflow-x-auto">{{ error }}</pre>
         </AlertDescription>
@@ -76,7 +85,10 @@
 
   <Card v-if="response" class="mb-6">
     <CardHeader>
-      <CardTitle>🚀 Trigger Translation</CardTitle>
+      <CardTitle class="flex items-center gap-2">
+        <Icon icon="mdi:rocket-launch" :size="24" />
+        Trigger Translation
+      </CardTitle>
       <CardDescription>Start the translation process for uploaded files</CardDescription>
     </CardHeader>
     <CardContent>
@@ -94,6 +106,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
+import Icon from './Icon.vue'
 
 const senderId = ref('')
 const locale = ref('en')

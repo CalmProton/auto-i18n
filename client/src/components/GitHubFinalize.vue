@@ -1,7 +1,10 @@
 <template>
   <Card class="mb-6">
     <CardHeader>
-      <CardTitle>🔀 GitHub Finalize</CardTitle>
+      <CardTitle class="flex items-center gap-2">
+        <Icon icon="mdi:source-pull" :size="24" />
+        GitHub Finalize
+      </CardTitle>
       <CardDescription>Create a pull request with your translations</CardDescription>
     </CardHeader>
     <CardContent>
@@ -55,7 +58,10 @@
       </form>
 
       <Alert v-if="response" class="mt-4">
-        <AlertTitle>✅ Pull Request Created</AlertTitle>
+        <AlertTitle class="flex items-center gap-2">
+          <Icon icon="mdi:check-circle" :size="20" color="#22c55e" />
+          Pull Request Created
+        </AlertTitle>
         <AlertDescription>
           <pre class="mt-2 text-xs overflow-x-auto">{{ JSON.stringify(response, null, 2) }}</pre>
           <div v-if="response.pullRequestUrl" class="mt-3">
@@ -71,7 +77,10 @@
       </Alert>
 
       <Alert v-if="error" variant="destructive" class="mt-4">
-        <AlertTitle>❌ Error</AlertTitle>
+        <AlertTitle class="flex items-center gap-2">
+          <Icon icon="mdi:close-circle" :size="20" />
+          Error
+        </AlertTitle>
         <AlertDescription>
           <pre class="mt-2 text-xs overflow-x-auto">{{ error }}</pre>
         </AlertDescription>
@@ -87,6 +96,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
+import Icon from './Icon.vue'
 
 const senderId = ref('')
 const repoOwner = ref('')

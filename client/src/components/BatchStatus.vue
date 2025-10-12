@@ -1,7 +1,10 @@
 <template>
   <Card class="mb-6">
     <CardHeader>
-      <CardTitle>📊 Batch Status & Processing</CardTitle>
+      <CardTitle class="flex items-center gap-2">
+        <Icon icon="mdi:chart-box" :size="24" />
+        Batch Status & Processing
+      </CardTitle>
       <CardDescription>Check the status of your translation batches</CardDescription>
     </CardHeader>
     <CardContent>
@@ -23,14 +26,20 @@
       </form>
 
       <Alert v-if="status" class="mt-4">
-        <AlertTitle>📋 Batch Status</AlertTitle>
+        <AlertTitle class="flex items-center gap-2">
+          <Icon icon="mdi:clipboard-list" :size="20" />
+          Batch Status
+        </AlertTitle>
         <AlertDescription>
           <pre class="mt-2 text-xs overflow-x-auto">{{ JSON.stringify(status, null, 2) }}</pre>
         </AlertDescription>
       </Alert>
 
       <Alert v-if="error" variant="destructive" class="mt-4">
-        <AlertTitle>❌ Error</AlertTitle>
+        <AlertTitle class="flex items-center gap-2">
+          <Icon icon="mdi:close-circle" :size="20" />
+          Error
+        </AlertTitle>
         <AlertDescription>
           <pre class="mt-2 text-xs overflow-x-auto">{{ error }}</pre>
         </AlertDescription>
@@ -53,6 +62,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
+import Icon from './Icon.vue'
 
 const senderId = ref('')
 const loading = ref(false)

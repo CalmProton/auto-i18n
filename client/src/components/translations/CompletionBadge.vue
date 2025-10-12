@@ -1,25 +1,35 @@
 <template>
   <span
     :class="badgeClass"
-    class="inline-flex items-center rounded-full px-2 py-1 text-xs font-medium"
+    class="inline-flex items-center rounded-full px-2 py-1 text-xs font-medium gap-1"
   >
-    {{ icon }} {{ percentage }}%
+    <Icon :icon="iconName" :size="14" :color="iconColor" />
+    {{ percentage }}%
   </span>
 </template>
 
 <script setup lang="ts">
 import { computed } from 'vue'
+import Icon from '../Icon.vue'
 
 const props = defineProps<{
   percentage: number
 }>()
 
-const icon = computed(() => {
-  if (props.percentage === 100) return '✅'
-  if (props.percentage >= 75) return '🟢'
-  if (props.percentage >= 50) return '🟡'
-  if (props.percentage >= 25) return '🟠'
-  return '🔴'
+const iconName = computed(() => {
+  if (props.percentage === 100) return 'mdi:check-circle'
+  if (props.percentage >= 75) return 'mdi:circle'
+  if (props.percentage >= 50) return 'mdi:circle'
+  if (props.percentage >= 25) return 'mdi:circle'
+  return 'mdi:circle'
+})
+
+const iconColor = computed(() => {
+  if (props.percentage === 100) return '#22c55e'
+  if (props.percentage >= 75) return '#3b82f6'
+  if (props.percentage >= 50) return '#eab308'
+  if (props.percentage >= 25) return '#f97316'
+  return '#ef4444'
 })
 
 const badgeClass = computed(() => {

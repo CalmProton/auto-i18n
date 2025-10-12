@@ -11,7 +11,8 @@
         Please enter a PR description
       </p>
       <p v-else class="text-green-600">
-        ✓ Ready to create pull request
+        <Icon icon="mdi:check" :size="16" class="inline" color="#22c55e" />
+        Ready to create pull request
       </p>
     </div>
 
@@ -20,9 +21,12 @@
       :disabled="disabled || creating"
       size="lg"
     >
-      <span v-if="creating">Creating PR...</span>
-      <span v-else>
-        <span class="mr-2">🚀</span>
+      <span v-if="creating" class="flex items-center gap-2">
+        <Icon icon="mdi:loading" :size="16" class="animate-spin" />
+        Creating PR...
+      </span>
+      <span v-else class="flex items-center gap-2">
+        <Icon icon="mdi:rocket-launch" :size="16" />
         Create Pull Request
       </span>
     </Button>
@@ -33,6 +37,7 @@
 import { ref } from 'vue'
 import type { GitHubSession } from '@/types/api'
 import { Button } from '@/components/ui/button'
+import Icon from '../Icon.vue'
 
 defineProps<{
   session: GitHubSession

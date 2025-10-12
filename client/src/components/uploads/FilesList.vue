@@ -15,7 +15,10 @@
     <div v-else class="space-y-4">
       <!-- Content Files -->
       <div v-if="uploadDetail.files.content?.length">
-        <div class="font-medium text-sm mb-2">📄 Content Files ({{ uploadDetail.files.content.length }})</div>
+        <div class="font-medium text-sm mb-2 flex items-center gap-1">
+          <Icon icon="mdi:file-document-multiple" :size="16" />
+          Content Files ({{ uploadDetail.files.content.length }})
+        </div>
         <div class="space-y-1">
           <div
             v-for="file in uploadDetail.files.content"
@@ -30,7 +33,10 @@
 
       <!-- Global Files -->
       <div v-if="uploadDetail.files.global?.length">
-        <div class="font-medium text-sm mb-2">🌐 Global Files ({{ uploadDetail.files.global.length }})</div>
+        <div class="font-medium text-sm mb-2 flex items-center gap-1">
+          <Icon icon="mdi:web" :size="16" />
+          Global Files ({{ uploadDetail.files.global.length }})
+        </div>
         <div class="space-y-1">
           <div
             v-for="file in uploadDetail.files.global"
@@ -45,7 +51,10 @@
 
       <!-- Page Files -->
       <div v-if="uploadDetail.files.page?.length">
-        <div class="font-medium text-sm mb-2">📑 Page Files ({{ uploadDetail.files.page.length }})</div>
+        <div class="font-medium text-sm mb-2 flex items-center gap-1">
+          <Icon icon="mdi:file-multiple" :size="16" />
+          Page Files ({{ uploadDetail.files.page.length }})
+        </div>
         <div class="space-y-1">
           <div
             v-for="file in uploadDetail.files.page"
@@ -70,6 +79,7 @@
 import { computed, onMounted } from 'vue'
 import { useUploads } from '@/composables'
 import { Alert, AlertDescription } from '@/components/ui/alert'
+import Icon from '../Icon.vue'
 
 const props = defineProps<{
   senderId: string

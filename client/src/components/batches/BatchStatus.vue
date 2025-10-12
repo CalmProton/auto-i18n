@@ -1,14 +1,16 @@
 <template>
   <span
     :class="statusClass"
-    class="inline-flex items-center rounded-full px-2 py-1 text-xs font-medium"
+    class="inline-flex items-center rounded-full px-2 py-1 text-xs font-medium gap-1"
   >
-    {{ statusIcon }} {{ statusLabel }}
+    <Icon :icon="statusIcon" :size="14" />
+    {{ statusLabel }}
   </span>
 </template>
 
 <script setup lang="ts">
 import { computed } from 'vue'
+import Icon from '../Icon.vue'
 import type { Batch } from '@/types/api'
 
 const props = defineProps<{
@@ -39,21 +41,21 @@ const statusLabel = computed(() => {
 const statusIcon = computed(() => {
   switch (props.batch.status) {
     case 'pending':
-      return '⏸'
+      return 'mdi:pause-circle'
     case 'submitted':
-      return '📤'
+      return 'mdi:upload'
     case 'processing':
-      return '⏳'
+      return 'mdi:clock-outline'
     case 'completed':
-      return '✅'
+      return 'mdi:check-circle'
     case 'failed':
-      return '❌'
+      return 'mdi:close-circle'
     case 'cancelled':
-      return '🚫'
+      return 'mdi:cancel'
     case 'partially_failed':
-      return '⚠️'
+      return 'mdi:alert'
     default:
-      return '●'
+      return 'mdi:circle'
   }
 })
 

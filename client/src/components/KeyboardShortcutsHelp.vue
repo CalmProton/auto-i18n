@@ -6,8 +6,13 @@
   >
     <div class="bg-background border rounded-lg shadow-lg max-w-md w-full mx-4 p-6">
       <div class="flex items-center justify-between mb-4">
-        <h2 class="text-xl font-bold">⌨️ Keyboard Shortcuts</h2>
-        <Button @click="close" variant="ghost" size="sm">✕</Button>
+        <div class="flex items-center gap-2">
+          <Icon icon="mdi:keyboard" :size="24" color="3b82f6" />
+          <h2 class="text-xl font-bold">Keyboard Shortcuts</h2>
+        </div>
+        <Button @click="close" variant="ghost" size="sm">
+          <Icon icon="mdi:close" :size="20" />
+        </Button>
       </div>
 
       <div class="space-y-3">
@@ -43,6 +48,7 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted } from 'vue'
 import { Button } from '@/components/ui/button'
+import Icon from './Icon.vue'
 
 const isOpen = ref(false)
 

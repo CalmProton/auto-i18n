@@ -5,7 +5,8 @@
       size="sm"
       @click="$emit('toggleExpand')"
     >
-      {{ isExpanded ? '▼' : '▶' }} Matrix
+      <Icon :icon="isExpanded ? 'mdi:chevron-down' : 'mdi:chevron-right'" :size="20" class="mr-1" />
+      Matrix
     </Button>
     
     <Button
@@ -14,7 +15,8 @@
       size="sm"
       @click="handleCreatePR"
     >
-      🔀 Create PR
+      <Icon icon="mdi:source-pull" :size="18" class="mr-1" />
+      Create PR
     </Button>
     
     <Button
@@ -22,7 +24,8 @@
       size="sm"
       @click="handleExport"
     >
-      📦 Export
+      <Icon icon="mdi:file-export" :size="18" class="mr-1" />
+      Export
     </Button>
   </div>
 </template>
@@ -31,6 +34,7 @@
 import { computed } from 'vue'
 import { useTranslations, useToast } from '@/composables'
 import { Button } from '@/components/ui/button'
+import Icon from '../Icon.vue'
 import type { TranslationSession } from '@/types/api'
 
 const props = defineProps<{

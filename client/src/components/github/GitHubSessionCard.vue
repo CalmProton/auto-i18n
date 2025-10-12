@@ -6,9 +6,18 @@
           <CardTitle class="text-lg">{{ session.senderId }}</CardTitle>
           <CardDescription class="mt-1">
             <div class="flex items-center gap-4 text-xs">
-              <span>🏢 {{ session.repository.owner }}/{{ session.repository.name }}</span>
-              <span>🌱 {{ session.repository.baseBranch }}</span>
-              <span>🗣️ {{ session.sourceLocale }}</span>
+              <span class="flex items-center gap-1">
+                <Icon icon="mdi:source-repository" :size="14" />
+                {{ session.repository.owner }}/{{ session.repository.name }}
+              </span>
+              <span class="flex items-center gap-1">
+                <Icon icon="mdi:source-branch" :size="14" />
+                {{ session.repository.baseBranch }}
+              </span>
+              <span class="flex items-center gap-1">
+                <Icon icon="mdi:translate" :size="14" />
+                {{ session.sourceLocale }}
+              </span>
             </div>
           </CardDescription>
         </div>
@@ -17,7 +26,7 @@
           variant="ghost"
           size="sm"
         >
-          {{ isExpanded ? '▼' : '▶' }}
+          <Icon :icon="isExpanded ? 'mdi:chevron-down' : 'mdi:chevron-right'" :size="20" />
         </Button>
       </div>
     </CardHeader>
@@ -81,6 +90,7 @@ import { ref, computed } from 'vue'
 import type { GitHubSession } from '@/types/api'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
+import Icon from '../Icon.vue'
 import LocaleSelector from './LocaleSelector.vue'
 import PRMetadataForm from './PRMetadataForm.vue'
 import CreatePRButton from './CreatePRButton.vue'

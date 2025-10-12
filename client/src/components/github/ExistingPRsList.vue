@@ -18,8 +18,14 @@
               <CardTitle class="text-base">{{ session.senderId }}</CardTitle>
               <CardDescription class="mt-1">
                 <div class="flex items-center gap-3 text-xs">
-                  <span>🏢 {{ session.repository.owner }}/{{ session.repository.name }}</span>
-                  <span>🌱 {{ session.repository.baseBranch }}</span>
+                  <span class="flex items-center gap-1">
+                    <Icon icon="mdi:source-repository" :size="14" />
+                    {{ session.repository.owner }}/{{ session.repository.name }}
+                  </span>
+                  <span class="flex items-center gap-1">
+                    <Icon icon="mdi:source-branch" :size="14" />
+                    {{ session.repository.baseBranch }}
+                  </span>
                 </div>
               </CardDescription>
             </div>
@@ -71,6 +77,7 @@
 import type { GitHubSession } from '@/types/api'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
+import Icon from '../Icon.vue'
 
 defineProps<{
   sessions: GitHubSession[]

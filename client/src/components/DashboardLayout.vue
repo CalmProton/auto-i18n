@@ -4,11 +4,14 @@
     <div class="border-b">
       <div class="container mx-auto px-6 py-4">
         <div class="flex items-center justify-between">
-          <div>
-            <h1 class="text-3xl font-bold">🌍 Auto-i18n Dashboard</h1>
-            <p class="text-sm text-muted-foreground mt-1">
-              Manage your translation pipeline from upload to PR
-            </p>
+          <div class="flex items-center gap-3">
+            <Icon icon="mdi:translate" :size="32" color="3b82f6" />
+            <div>
+              <h1 class="text-3xl font-bold">Auto-i18n Dashboard</h1>
+              <p class="text-sm text-muted-foreground mt-1">
+                Manage your translation pipeline from upload to PR
+              </p>
+            </div>
           </div>
           
           <div class="flex items-center gap-4">
@@ -18,7 +21,7 @@
               @click="showHelp"
               title="Keyboard shortcuts (Press ?)"
             >
-              ⌨️
+              <Icon icon="mdi:keyboard" :size="20" />
             </Button>
             <Button variant="outline" size="sm" @click="handleLogout" v-if="isAuthenticated">
               Logout
@@ -37,17 +40,21 @@
     <div class="container mx-auto px-6">
       <Tabs v-model="activeTab" class="w-full">
         <TabsList class="grid w-full grid-cols-4">
-          <TabsTrigger value="uploads">
-            📦 Uploads
+          <TabsTrigger value="uploads" class="flex items-center gap-2">
+            <Icon icon="mdi:upload" :size="18" />
+            <span>Uploads</span>
           </TabsTrigger>
-          <TabsTrigger value="batches">
-            🔄 Batches
+          <TabsTrigger value="batches" class="flex items-center gap-2">
+            <Icon icon="mdi:progress-clock" :size="18" />
+            <span>Batches</span>
           </TabsTrigger>
-          <TabsTrigger value="translations">
-            🌐 Translations
+          <TabsTrigger value="translations" class="flex items-center gap-2">
+            <Icon icon="mdi:translate" :size="18" />
+            <span>Translations</span>
           </TabsTrigger>
-          <TabsTrigger value="github">
-            🔀 GitHub
+          <TabsTrigger value="github" class="flex items-center gap-2">
+            <Icon icon="mdi:github" :size="18" />
+            <span>GitHub</span>
           </TabsTrigger>
         </TabsList>
       </Tabs>
@@ -73,6 +80,7 @@ import { ref, computed } from 'vue'
 import { useAuth, useKeyboardShortcuts } from '@/composables'
 import { Button } from '@/components/ui/button'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import Icon from './Icon.vue'
 import StatsOverview from './StatsOverview.vue'
 import UploadsTab from './UploadsTab.vue'
 import BatchesTab from './BatchesTab.vue'

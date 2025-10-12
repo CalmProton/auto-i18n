@@ -94,7 +94,10 @@
         </div>
         <div>
           <span class="font-semibold">Output:</span>
-          <span class="ml-1">{{ batch.hasOutput ? '✓ Available' : '✗ Not available' }}</span>
+          <span class="ml-1 flex items-center gap-1">
+            <Icon :icon="batch.hasOutput ? 'mdi:check' : 'mdi:close'" :size="14" />
+            {{ batch.hasOutput ? 'Available' : 'Not available' }}
+          </span>
         </div>
       </div>
     </div>
@@ -103,6 +106,7 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
+import Icon from '../Icon.vue'
 import type { Batch } from '@/types/api'
 
 const props = defineProps<{
