@@ -10,12 +10,12 @@ export default defineConfig({
     coverage: {
       provider: 'v8',
       reporter: ['text', 'json', 'html'],
-      include: ['client/src/**/*.{ts,tsx,vue}'],
+      include: ['client/**/*.{ts,tsx,vue}'],
       exclude: [
-        'client/src/**/*.d.ts',
-        'client/src/**/types/**',
-        'client/src/main.ts',
-        'client/src/vite-env.d.ts',
+        'client/**/*.d.ts',
+        'client/**/types/**',
+        'client/main.ts',
+        'client/vite-env.d.ts',
       ],
     },
     include: ['tests/client/**/*.{test,spec}.{ts,tsx}'],
@@ -23,8 +23,8 @@ export default defineConfig({
   },
   resolve: {
     alias: {
-      '@': resolve(__dirname, './client/src'),
-      '@client': resolve(__dirname, './client/src'),
+      '@': resolve(__dirname, './client'),
+      '@client': resolve(__dirname, './client'),
       '@server': resolve(__dirname, './server'),
     },
   },

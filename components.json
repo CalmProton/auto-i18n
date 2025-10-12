@@ -4,7 +4,7 @@
   "typescript": true,
   "tailwind": {
     "config": "",
-    "css": "client/src/style.css",
+    "css": "client/style.css",
     "baseColor": "zinc",
     "cssVariables": true,
     "prefix": ""

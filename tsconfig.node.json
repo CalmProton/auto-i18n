@@ -22,8 +22,8 @@
     /* Path resolution */
     "baseUrl": ".",
     "paths": {
-      "@/*": ["./client/src/*"],
-      "@client/*": ["./client/src/*"],
+      "@/*": ["./client/*"],
+      "@client/*": ["./client/*"],
       "@server/*": ["./server/*"]
     }
   },

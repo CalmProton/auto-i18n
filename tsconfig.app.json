@@ -24,10 +24,10 @@
     /* Path resolution */
     "baseUrl": ".",
     "paths": {
-      "@/*": ["./client/src/*"],
-      "@client/*": ["./client/src/*"],
+      "@/*": ["./client/*"],
+      "@client/*": ["./client/*"],
       "@server/*": ["./server/*"]
     }
   },
-  "include": ["client/src/**/*.ts", "client/src/**/*.tsx", "client/src/**/*.vue"]
+  "include": ["client/**/*.ts", "client/**/*.tsx", "client/**/*.vue"]
 }
