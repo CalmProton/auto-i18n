@@ -46,7 +46,7 @@
     <!-- Tabs Navigation -->
     <div class="container mx-auto px-6">
       <Tabs v-model="activeTab" class="w-full">
-        <TabsList class="grid w-full grid-cols-4">
+        <TabsList class="grid w-full grid-cols-5">
           <TabsTrigger value="uploads" class="flex items-center gap-2">
             <Upload class="h-4 w-4" />
             <span>Uploads</span>
@@ -54,6 +54,10 @@
           <TabsTrigger value="batches" class="flex items-center gap-2">
             <Timer class="h-4 w-4" />
             <span>Batches</span>
+          </TabsTrigger>
+          <TabsTrigger value="changes" class="flex items-center gap-2">
+            <GitBranch class="h-4 w-4" />
+            <span>Changes</span>
           </TabsTrigger>
           <TabsTrigger value="translations" class="flex items-center gap-2">
             <Languages class="h-4 w-4" />
@@ -85,7 +89,7 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
 import { useAuth, useKeyboardShortcuts } from '@/composables'
-import { Languages, Upload, Timer, Github, Keyboard, LogOut } from 'lucide-vue-next'
+import { Languages, Upload, Timer, Github, Keyboard, LogOut, GitBranch } from 'lucide-vue-next'
 import { Button } from '@/components/ui/button'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
@@ -95,6 +99,7 @@ import UploadsTab from './UploadsTab.vue'
 import BatchesTab from './BatchesTab.vue'
 import TranslationsTab from './TranslationsTab.vue'
 import GitHubTab from './GitHubTab.vue'
+import ChangesTab from './ChangesTab.vue'
 import ToastContainer from './ToastContainer.vue'
 import KeyboardShortcutsHelp from './KeyboardShortcutsHelp.vue'
 
@@ -123,11 +128,17 @@ useKeyboardShortcuts([
   {
     key: '3',
     alt: true,
+    description: 'Go to Changes tab',
+    handler: () => activeTab.value = 'changes'
+  },
+  {
+    key: '4',
+    alt: true,
     description: 'Go to Translations tab',
     handler: () => activeTab.value = 'translations'
   },
   {
-    key: '4',
+    key: '5',
     alt: true,
     description: 'Go to GitHub tab',
     handler: () => activeTab.value = 'github'
@@ -140,6 +151,8 @@ const currentTabComponent = computed(() => {
       return UploadsTab
     case 'batches':
       return BatchesTab
+    case 'changes':
+      return ChangesTab
     case 'translations':
       return TranslationsTab
     case 'github':

@@ -239,3 +239,51 @@ export interface ExportTranslationsRequest {
   types?: ('content' | 'global' | 'page')[]
   format?: 'zip' | 'json'
 }
+
+/**
+ * Changes Dashboard API Types
+ */
+
+export interface ChangeSession {
+  sessionId: string
+  repositoryName: string
+  repository: {
+    owner: string
+    name: string
+    baseBranch: string
+  }
+  commit: {
+    sha: string
+    shortSha: string
+    message: string
+    author?: string
+    timestamp: string
+  }
+  status: import('./index').ChangeStatus
+  automationMode: import('./index').AutomationMode
+  sourceLocale: string
+  targetLocales: string[]
+  changeCount: {
+    added: number
+    modified: number
+    deleted: number
+    total: number
+  }
+  progress: {
+    current: number
+    total: number
+    percentage: number
+  }
+  steps: import('./index').ChangeSessionSteps
+  batchId?: string
+  pullRequestNumber?: number
+  pullRequestUrl?: string
+  deletionPullRequest?: {
+    number: number
+    url: string
+  }
+  hasErrors: boolean
+  errorCount: number
+  createdAt: string
+  updatedAt: string
+}

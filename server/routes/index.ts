@@ -5,6 +5,7 @@ import pageTranslationRoutes from './page'
 import githubRoutes from './github'
 import batchRoutes from './batch'
 import dashboardRoutes from './dashboard'
+import changesRoutes from './changes'
 
 const routes = new Elysia()
 
@@ -15,6 +16,6 @@ routes.use(pageTranslationRoutes)
 routes.use(batchRoutes)
 routes.use(githubRoutes)
 routes.use(dashboardRoutes)
-// will add "changes" route later to translate changes and not full content
+routes.use(changesRoutes)
 
 export default routes

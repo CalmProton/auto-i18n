@@ -353,4 +353,28 @@ export class GitHubClient {
       log.warn('Failed to ensure labels exist', { owner, repo, error })
     }
   }
+
+  /**
+   * Get file content from a specific commit
+   */
+  async getFileContent(owner: string, repo: string, path: string, ref: string): Promise<string> {
+    interface FileContentResponse {
+      type: string
+      encoding: string
+      content: string
+      sha: string
+    }
+
+    const response = await this.request<FileContentResponse>({
+      method: 'GET',
+      path: `/repos/${owner}/${repo}/contents/${encodeURIComponent(path)}`,
+      query: { ref }
+    })
+
+    if (response.encoding === 'base64') {
+      return Buffer.from(response.content, 'base64').toString('utf-8')
+    }
+
+    return response.content
+  }
 }

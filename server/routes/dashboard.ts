@@ -516,4 +516,192 @@ dashboardRoutes.get('/api/locales', async () => {
   }
 })
 
+// ==================== CHANGES ====================
+
+/**
+ * GET /api/changes
+ * List all change sessions
+ */
+dashboardRoutes.get(
+  '/changes',
+  async ({ query }) => {
+    try {
+      const { listChangeSessions } = await import('../utils/changeStorage')
+      const { status, limit = 50, offset = 0 } = query
+      
+      let sessions = await listChangeSessions()
+
+      // Filter by status if provided
+      if (status && status !== 'all') {
+        sessions = sessions.filter((s) => s.status === status)
+      }
+
+      // Sort by most recent first
+      sessions.sort((a, b) => 
+        new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+      )
+
+      // Apply pagination
+      const total = sessions.length
+      const paginatedSessions = sessions.slice(Number(offset), Number(offset) + Number(limit))
+
+      // Transform to API format
+      const changes = paginatedSessions.map((session) => {
+        const changeCount = {
+          added: session.changes.filter(c => c.changeType === 'added').length,
+          modified: session.changes.filter(c => c.changeType === 'modified').length,
+          deleted: session.changes.filter(c => c.changeType === 'deleted').length,
+          total: session.changes.length
+        }
+
+        // Calculate progress
+        const steps = Object.values(session.steps)
+        const completedSteps = steps.filter(s => s.completed).length
+        const totalSteps = steps.length
+        const progress = {
+          current: completedSteps,
+          total: totalSteps,
+          percentage: Math.round((completedSteps / totalSteps) * 100)
+        }
+
+        return {
+          sessionId: session.sessionId,
+          repositoryName: `${session.repository.owner}/${session.repository.name}`,
+          repository: {
+            owner: session.repository.owner,
+            name: session.repository.name,
+            baseBranch: session.repository.baseBranch
+          },
+          commit: session.commit,
+          status: session.status,
+          automationMode: session.automationMode,
+          sourceLocale: session.sourceLocale,
+          targetLocales: session.targetLocales,
+          changeCount,
+          progress,
+          steps: session.steps,
+          batchId: session.steps.batchCreated.batchId,
+          pullRequestNumber: session.steps.prCreated.pullRequestNumber,
+          pullRequestUrl: session.steps.prCreated.pullRequestUrl,
+          deletionPullRequest: session.deletionPullRequest,
+          hasErrors: session.errors.length > 0,
+          errorCount: session.errors.length,
+          createdAt: session.createdAt,
+          updatedAt: session.updatedAt
+        }
+      })
+
+      return {
+        changes,
+        pagination: {
+          total,
+          limit: Number(limit),
+          offset: Number(offset),
+          hasMore: Number(offset) + Number(limit) < total
+        }
+      }
+    } catch (error) {
+      log.error('Error listing changes:', error)
+      return { error: 'Failed to list changes', changes: [] }
+    }
+  },
+  {
+    query: t.Object({
+      status: t.Optional(t.Union([
+        t.Literal('all'),
+        t.Literal('uploaded'),
+        t.Literal('batch-created'),
+        t.Literal('submitted'),
+        t.Literal('processing'),
+        t.Literal('completed'),
+        t.Literal('failed'),
+        t.Literal('pr-created')
+      ])),
+      limit: t.Optional(t.Numeric({ default: 50 })),
+      offset: t.Optional(t.Numeric({ default: 0 }))
+    })
+  }
+)
+
+/**
+ * GET /api/changes/:sessionId
+ * Get detailed information about a specific change session
+ */
+dashboardRoutes.get('/changes/:sessionId', async ({ params }) => {
+  try {
+    const { loadChangeSession } = await import('../utils/changeStorage')
+    const { sessionId } = params
+    const session = await loadChangeSession(sessionId)
+
+    if (!session) {
+      return { error: 'Change session not found' }
+    }
+
+    const changeCount = {
+      added: session.changes.filter(c => c.changeType === 'added').length,
+      modified: session.changes.filter(c => c.changeType === 'modified').length,
+      deleted: session.changes.filter(c => c.changeType === 'deleted').length,
+      total: session.changes.length
+    }
+
+    const steps = Object.values(session.steps)
+    const completedSteps = steps.filter(s => s.completed).length
+    const totalSteps = steps.length
+    const progress = {
+      current: completedSteps,
+      total: totalSteps,
+      percentage: Math.round((completedSteps / totalSteps) * 100)
+    }
+
+    return {
+      sessionId: session.sessionId,
+      repositoryName: `${session.repository.owner}/${session.repository.name}`,
+      repository: session.repository,
+      commit: session.commit,
+      status: session.status,
+      automationMode: session.automationMode,
+      sourceLocale: session.sourceLocale,
+      targetLocales: session.targetLocales,
+      changes: session.changes,
+      changeCount,
+      progress,
+      steps: session.steps,
+      errors: session.errors,
+      deletionPullRequest: session.deletionPullRequest,
+      createdAt: session.createdAt,
+      updatedAt: session.updatedAt
+    }
+  } catch (error) {
+    log.error('Error getting change session:', error)
+    return { error: 'Failed to get change session' }
+  }
+})
+
+/**
+ * DELETE /api/changes/:sessionId
+ * Delete a change session
+ */
+dashboardRoutes.delete('/changes/:sessionId', async ({ params }) => {
+  try {
+    const { deleteChangeSession } = await import('../utils/changeStorage')
+    const { sessionId } = params
+    
+    const success = await deleteChangeSession(sessionId)
+    
+    if (!success) {
+      return { error: 'Change session not found' }
+    }
+
+    log.info('Deleted change session via API', { sessionId })
+    
+    return { 
+      success: true,
+      message: 'Change session deleted successfully' 
+    }
+  } catch (error) {
+    log.error('Error deleting change session:', error)
+    return { error: 'Failed to delete change session' }
+  }
+})
+
 export default dashboardRoutes

@@ -1,0 +1,193 @@
+name: Auto i18n Changes
+
+on:
+  push:
+    branches: [main, master]
+    paths:
+      - 'content/en/**/*.md'
+      - 'i18n/locales/en.json'
+      - 'i18n/locales/pages/**/*.json'
+
+jobs:
+  translate-changes:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2  # Need previous commit for diff
+
+      - name: Detect changed files
+        id: changes
+        run: |
+          echo "Detecting changed files..."
+          
+          # Get list of changed files
+          CHANGED_FILES=$(git diff --name-only HEAD~1 HEAD -- 'content/en/**/*.md' 'i18n/locales/en.json' 'i18n/locales/pages/**/*.json' || true)
+          
+          if [ -z "$CHANGED_FILES" ]; then
+            echo "No translation files changed"
+            echo "has_changes=false" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+          
+          echo "has_changes=true" >> $GITHUB_OUTPUT
+          echo "Changed files:"
+          echo "$CHANGED_FILES"
+          
+          # Save changed files list
+          echo "$CHANGED_FILES" > changed_files.txt
+
+      - name: Categorize changes
+        id: categorize
+        if: steps.changes.outputs.has_changes == 'true'
+        run: |
+          echo "Categorizing changes..."
+          
+          CONTENT_FILES=""
+          GLOBAL_FILE=""
+          PAGE_FILES=""
+          
+          while IFS= read -r FILE; do
+            if [[ "$FILE" == content/en/*.md ]]; then
+              CONTENT_FILES="$CONTENT_FILES $FILE"
+            elif [[ "$FILE" == i18n/locales/en.json ]]; then
+              GLOBAL_FILE="$FILE"
+            elif [[ "$FILE" == i18n/locales/pages/*.json ]]; then
+              PAGE_FILES="$PAGE_FILES $FILE"
+            fi
+          done < changed_files.txt
+          
+          echo "content_files=$CONTENT_FILES" >> $GITHUB_OUTPUT
+          echo "global_file=$GLOBAL_FILE" >> $GITHUB_OUTPUT
+          echo "page_files=$PAGE_FILES" >> $GITHUB_OUTPUT
+
+      - name: Send changes to translation service
+        if: steps.changes.outputs.has_changes == 'true'
+        env:
+          ENDPOINT: ${{ vars['AUTO_I18N_ENDPOINT'] }}
+          ACCESS_KEY: ${{ secrets['AUTO_I18N_ACCESS_KEY'] }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          if [ -z "$ENDPOINT" ]; then
+            echo "AUTO_I18N_ENDPOINT repository variable is not set."
+            exit 1
+          fi
+          
+          # Build session ID
+          COMMIT_SHORT=$(echo "${GITHUB_SHA}" | cut -c1-7)
+          SESSION_ID=$(echo "$REPOSITORY" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9._-]/-/g')
+          SESSION_ID="${SESSION_ID}-${COMMIT_SHORT}"
+          
+          echo "Session ID: $SESSION_ID"
+          
+          # Repository metadata
+          REPO_OWNER=$(echo "$REPOSITORY" | cut -d/ -f1)
+          REPO_NAME=$(echo "$REPOSITORY" | cut -d/ -f2)
+          BASE_BRANCH="${GITHUB_REF_NAME}"
+          BASE_COMMIT_SHA=$(git rev-parse HEAD~1)
+          COMMIT_SHA="${GITHUB_SHA}"
+          COMMIT_MESSAGE=$(git log -1 --pretty=%B | head -n 1)
+          COMMIT_AUTHOR=$(git log -1 --pretty=format:'%an')
+          SOURCE_LOCALE="en"
+          
+          # Target locales (configure these in your repo)
+          TARGET_LOCALES="${{ vars['AUTO_I18N_TARGET_LOCALES'] }}"
+          if [ -z "$TARGET_LOCALES" ]; then
+            TARGET_LOCALES="ru,zh,hi,es,fr,ar,bn,pt,id,de,ja,ko,tr,vi,it,fa,pl,nl,ro,el,cs,hu,sv,bg,da,fi,sk,hr,no,sl,sr"
+          fi
+          
+          # Convert comma-separated targetLocales to JSON array
+          TARGET_LOCALE_JSON=""
+          IFS=',' read -ra LOCALE_ARRAY <<< "$TARGET_LOCALES"
+          for i in "${!LOCALE_ARRAY[@]}"; do
+            LOCALE_TRIMMED=$(echo "${LOCALE_ARRAY[$i]}" | xargs)
+            if [ $i -eq 0 ]; then
+              TARGET_LOCALE_JSON="\"$LOCALE_TRIMMED\""
+            else
+              TARGET_LOCALE_JSON="$TARGET_LOCALE_JSON,\"$LOCALE_TRIMMED\""
+            fi
+          done
+          
+          # Automation mode (configure in repo: 'auto' or 'manual')
+          AUTOMATION_MODE="${{ vars['AUTO_I18N_AUTOMATION_MODE'] }}"
+          if [ -z "$AUTOMATION_MODE" ]; then
+            AUTOMATION_MODE="auto"
+          fi
+          
+          # Build changes array
+          CHANGES_JSON=""
+          
+          # Process changed files
+          while IFS= read -r FILE; do
+            if [ -z "$FILE" ]; then
+              continue
+            fi
+            
+            # Detect change type (added, modified, deleted)
+            STATUS=$(git diff --name-status HEAD~1 HEAD -- "$FILE" | awk '{print $1}')
+            case "$STATUS" in
+              A) CHANGE_TYPE="added" ;;
+              M) CHANGE_TYPE="modified" ;;
+              D) CHANGE_TYPE="deleted" ;;
+              *) CHANGE_TYPE="modified" ;;
+            esac
+            
+            # Detect file type
+            if [[ "$FILE" == content/en/*.md ]]; then
+              FILE_TYPE="content"
+            elif [[ "$FILE" == i18n/locales/en.json ]]; then
+              FILE_TYPE="global"
+            elif [[ "$FILE" == i18n/locales/pages/*.json ]]; then
+              FILE_TYPE="page"
+            else
+              continue
+            fi
+            
+            # Add to changes array
+            if [ -n "$CHANGES_JSON" ]; then
+              CHANGES_JSON="$CHANGES_JSON,"
+            fi
+            CHANGES_JSON="$CHANGES_JSON{\"path\":\"$FILE\",\"type\":\"$FILE_TYPE\",\"changeType\":\"$CHANGE_TYPE\"}"
+          done < changed_files.txt
+          
+          # Build repository JSON
+          REPO_JSON=$(printf '{"owner":"%s","name":"%s","baseBranch":"%s","baseCommitSha":"%s","commitSha":"%s","commitMessage":"%s","commitAuthor":"%s"}' \
+            "$REPO_OWNER" "$REPO_NAME" "$BASE_BRANCH" "$BASE_COMMIT_SHA" "$COMMIT_SHA" \
+            "$(echo "$COMMIT_MESSAGE" | sed 's/"/\\"/g')" "$(echo "$COMMIT_AUTHOR" | sed 's/"/\\"/g')")
+          
+          # Build request body
+          REQUEST_URL="$ENDPOINT/translate/changes"
+          if [ -n "$ACCESS_KEY" ]; then
+            REQUEST_URL="$REQUEST_URL?access_key=$ACCESS_KEY"
+          fi
+          
+          echo "Uploading changes to $REQUEST_URL"
+          
+          # Prepare curl command with files
+          CURL_CMD="curl --fail-with-body --silent --show-error -X POST \"$REQUEST_URL\""
+          CURL_CMD="$CURL_CMD --form-string \"sessionId=$SESSION_ID\""
+          CURL_CMD="$CURL_CMD --form-string \"sourceLocale=$SOURCE_LOCALE\""
+          CURL_CMD="$CURL_CMD --form-string \"automationMode=$AUTOMATION_MODE\""
+          CURL_CMD="$CURL_CMD --form-string \"targetLocales=[$TARGET_LOCALE_JSON]\""
+          CURL_CMD="$CURL_CMD --form-string \"repository=$REPO_JSON\""
+          CURL_CMD="$CURL_CMD --form-string \"changes=[$CHANGES_JSON]\""
+          
+          # Add files that are not deleted
+          while IFS= read -r FILE; do
+            if [ -z "$FILE" ]; then
+              continue
+            fi
+            
+            STATUS=$(git diff --name-status HEAD~1 HEAD -- "$FILE" | awk '{print $1}')
+            if [ "$STATUS" != "D" ] && [ -f "$FILE" ]; then
+              # Sanitize path for field name
+              FIELD=$(echo "$FILE" | tr '/' '_' | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9_]/_/g')
+              CURL_CMD="$CURL_CMD -F \"$FIELD=@$FILE\""
+            fi
+          done < changed_files.txt
+          
+          # Execute curl command
+          eval $CURL_CMD
+          
+          echo "Changes uploaded successfully!"
+

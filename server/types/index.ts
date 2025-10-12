@@ -147,3 +147,115 @@ export interface PageUploadRequest extends BaseUploadRequest {
     file: File
   }>
 }
+
+/**
+ * Changes (Incremental Updates) Types
+ */
+
+export type ChangeType = 'added' | 'modified' | 'deleted'
+export type ChangeStatus = 
+  | 'uploaded' 
+  | 'batch-created' 
+  | 'submitted' 
+  | 'processing' 
+  | 'completed' 
+  | 'failed' 
+  | 'pr-created'
+
+export type AutomationMode = 'auto' | 'manual'
+
+export interface FileChange {
+  /** Path in the repository (e.g., "content/en/docs/guide.md") */
+  path: string
+  /** Type of file */
+  type: TranslationFileType
+  /** Type of change */
+  changeType: ChangeType
+  /** File size in bytes */
+  size?: number
+  /** Relative path after processing */
+  relativePath?: string
+}
+
+export interface CommitInfo {
+  sha: string
+  shortSha: string
+  message: string
+  author?: string
+  timestamp: string
+}
+
+export interface StepStatus {
+  completed: boolean
+  timestamp?: string
+  error?: string
+}
+
+export interface ChangeSessionSteps {
+  uploaded: StepStatus
+  batchCreated: StepStatus & { batchId?: string }
+  submitted: StepStatus & { openAiBatchId?: string }
+  processing: StepStatus & { progress?: number }
+  completed: StepStatus & { translationCount?: number }
+  prCreated: StepStatus & { pullRequestNumber?: number; pullRequestUrl?: string }
+}
+
+export interface JsonDelta {
+  added: Record<string, any>
+  modified: Record<string, any>
+  deleted: string[]
+}
+
+export interface ChangeSessionMetadata {
+  sessionId: string
+  status: ChangeStatus
+  repository: TranslationRepositoryMetadata & {
+    commitSha: string
+  }
+  commit: CommitInfo
+  sourceLocale: string
+  targetLocales: string[]
+  changes: FileChange[]
+  automationMode: AutomationMode
+  steps: ChangeSessionSteps
+  errors: Array<{
+    step: string
+    message: string
+    timestamp: string
+  }>
+  deletionPullRequest?: {
+    number: number
+    url: string
+  }
+  createdAt: string
+  updatedAt: string
+}
+
+export interface ChangesUploadRequest {
+  sessionId: string
+  repository: {
+    owner: string
+    name: string
+    baseBranch: string
+    baseCommitSha: string
+    commitSha: string
+    commitMessage: string
+    commitAuthor?: string
+  }
+  sourceLocale: string
+  targetLocales: string[]
+  changes: Array<{
+    path: string
+    type: TranslationFileType
+    changeType: ChangeType
+  }>
+  automationMode?: AutomationMode
+}
+
+export interface ChangeProcessResponse {
+  sessionId: string
+  status: ChangeStatus
+  message: string
+  batchId?: string
+  error?: string
+}

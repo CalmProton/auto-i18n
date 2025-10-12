@@ -239,3 +239,96 @@ export interface AuthValidateResponse {
   valid: boolean
   message: string
 }
+
+// Changes types
+export type ChangeStatus = 
+  | 'uploaded' 
+  | 'batch-created' 
+  | 'submitted' 
+  | 'processing' 
+  | 'completed' 
+  | 'failed' 
+  | 'pr-created'
+
+export type AutomationMode = 'auto' | 'manual'
+export type ChangeType = 'added' | 'modified' | 'deleted'
+
+export interface FileChange {
+  path: string
+  type: 'content' | 'global' | 'page'
+  changeType: ChangeType
+  size?: number
+  relativePath?: string
+}
+
+export interface CommitInfo {
+  sha: string
+  shortSha: string
+  message: string
+  author?: string
+  timestamp: string
+}
+
+export interface StepStatus {
+  completed: boolean
+  timestamp?: string
+  error?: string
+}
+
+export interface ChangeSessionSteps {
+  uploaded: StepStatus
+  batchCreated: StepStatus & { batchId?: string }
+  submitted: StepStatus & { openAiBatchId?: string }
+  processing: StepStatus & { progress?: number }
+  completed: StepStatus & { translationCount?: number }
+  prCreated: StepStatus & { pullRequestNumber?: number; pullRequestUrl?: string }
+}
+
+export interface ChangeSession {
+  sessionId: string
+  repositoryName: string
+  repository: {
+    owner: string
+    name: string
+    baseBranch: string
+  }
+  commit: CommitInfo
+  status: ChangeStatus
+  automationMode: AutomationMode
+  sourceLocale: string
+  targetLocales: string[]
+  changes?: FileChange[]
+  changeCount: {
+    added: number
+    modified: number
+    deleted: number
+    total: number
+  }
+  progress: {
+    current: number
+    total: number
+    percentage: number
+  }
+  steps: ChangeSessionSteps
+  batchId?: string
+  pullRequestNumber?: number
+  pullRequestUrl?: string
+  deletionPullRequest?: {
+    number: number
+    url: string
+  }
+  hasErrors: boolean
+  errorCount: number
+  errors?: Array<{
+    step: string
+    message: string
+    timestamp: string
+  }>
+  createdAt: string
+  updatedAt: string
+}
+
+export interface ChangesResponse {
+  changes: ChangeSession[]
+  pagination: Pagination
+}
