@@ -1,18 +1,18 @@
-import { Hono } from 'hono'
+import { Elysia } from 'elysia'
 import contentRoutes from './content'
 import globalTranslationRoutes from './global'
 import pageTranslationRoutes from './page'
 import githubRoutes from './github'
 import batchRoutes from './batch'
 
-const routes = new Hono()
+const routes = new Elysia()
 
 // Route modules
-routes.route('/translate/content', contentRoutes)
-routes.route('/translate/global', globalTranslationRoutes)
-routes.route('/translate/page', pageTranslationRoutes)
-routes.route('/translate/batch', batchRoutes)
-routes.route('/github', githubRoutes)
+routes.use(contentRoutes)
+routes.use(globalTranslationRoutes)
+routes.use(pageTranslationRoutes)
+routes.use(batchRoutes)
+routes.use(githubRoutes)
 // will add "changes" route later to translate changes and not full content
 
 export default routes

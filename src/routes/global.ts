@@ -1,4 +1,4 @@
-import { Hono } from 'hono'
+import { Elysia } from 'elysia'
 import { processGlobalTranslation, triggerGlobalTranslation } from '../services/fileProcessor'
 import { extractLocale, extractSenderId, parseGlobalUpload } from '../utils/fileValidation'
 import type { FileUploadResponse, ErrorResponse } from '../types'
@@ -7,45 +7,53 @@ import { createScopedLogger } from '../utils/logger'
 import { extractMetadataUpdate } from '../utils/metadataInput'
 import { updateMetadata } from '../utils/jobMetadata'
 
-const globalTranslationRoutes = new Hono()
+const globalTranslationRoutes = new Elysia({ prefix: '/translate/global' })
 const log = createScopedLogger('routes:global')
 
 // Upload endpoint for global translation file
 // Structure: [locale].json
-globalTranslationRoutes.post('/', async (c) => {
+globalTranslationRoutes.post('/', async ({ query, request, set }) => {
   try {
-    const body = await c.req.parseBody()
+    const formData = await request.formData()
+    const parsedBody: Record<string, unknown> = {}
+    for (const [key, value] of formData.entries()) {
+      parsedBody[key] = value
+    }
     
     // Extract locale and sender from query or body
-    const locale = c.req.query('locale') || extractLocale(body)
-    const senderId = c.req.query('senderId') || extractSenderId(body)
+    const locale = query.locale || extractLocale(parsedBody)
+    const senderId = query.senderId || extractSenderId(parsedBody)
     log.info('Received global translation upload', {
       locale,
       senderId,
-      bodyKeys: Object.keys(body ?? {}).filter((key) => key !== 'locale' && key !== 'senderId')
+      bodyKeys: Object.keys(parsedBody ?? {}).filter((key) => key !== 'locale' && key !== 'senderId')
     })
     if (!locale) {
+      set.status = 400
       const errorResponse: ErrorResponse = {
         error: 'Locale parameter is required'
       }
-      return c.json(errorResponse, 400)
+      return errorResponse
     }
     if (!isSupportedLocale(locale)) {
+      set.status = 400
       const errorResponse: ErrorResponse = {
         error: `Locale "${locale}" is not supported`
       }
-      return c.json(errorResponse, 400)
+      return errorResponse
     }
     if (!senderId) {
+      set.status = 400
       const errorResponse: ErrorResponse = {
         error: 'Sender identifier is required'
       }
-      return c.json(errorResponse, 400)
+      return errorResponse
     }
     
     // Parse and validate global upload request
-  const globalRequest = parseGlobalUpload(body, locale, senderId)
+  const globalRequest = parseGlobalUpload(parsedBody, locale, senderId)
     if (typeof globalRequest === 'string') {
+      set.status = 400
       const errorResponse: ErrorResponse = {
         error: globalRequest
       }
@@ -54,12 +62,12 @@ globalTranslationRoutes.post('/', async (c) => {
         senderId,
         reason: globalRequest
       })
-      return c.json(errorResponse, 400)
+      return errorResponse
     }
     
-    const metadataRaw = body.metadata ?? c.req.query('metadata')
-    const fallbackRepoPath = typeof body.repositorySourcePath === 'string' ? body.repositorySourcePath.trim() : undefined
-    const jobId = typeof body.jobId === 'string' ? body.jobId.trim() : 'global'
+    const metadataRaw = parsedBody.metadata ?? query.metadata
+    const fallbackRepoPath = typeof parsedBody.repositorySourcePath === 'string' ? parsedBody.repositorySourcePath.trim() : undefined
+    const jobId = typeof parsedBody.jobId === 'string' ? parsedBody.jobId.trim() : 'global'
 
     const metadataResult = extractMetadataUpdate({
       rawMetadata: metadataRaw,
@@ -76,6 +84,7 @@ globalTranslationRoutes.post('/', async (c) => {
     })
 
     if ('error' in metadataResult) {
+      set.status = 400
       const errorResponse: ErrorResponse = {
         error: metadataResult.error
       }
@@ -84,7 +93,7 @@ globalTranslationRoutes.post('/', async (c) => {
         locale,
         reason: metadataResult.error
       })
-      return c.json(errorResponse, 400)
+      return errorResponse
     }
 
     // Process the file
@@ -98,6 +107,7 @@ globalTranslationRoutes.post('/', async (c) => {
     const result = await processGlobalTranslation(globalRequest)
     
     if (!result.success) {
+      set.status = 500
       const errorResponse: ErrorResponse = {
         error: result.message
       }
@@ -106,7 +116,7 @@ globalTranslationRoutes.post('/', async (c) => {
         locale: globalRequest.locale,
         message: result.message
       })
-      return c.json(errorResponse, 500)
+      return errorResponse
     }
     
     try {
@@ -117,10 +127,11 @@ globalTranslationRoutes.post('/', async (c) => {
         locale,
         error
       })
+      set.status = 500
       const errorResponse: ErrorResponse = {
         error: 'Failed to persist metadata for global upload'
       }
-      return c.json(errorResponse, 500)
+      return errorResponse
     }
 
     const response: FileUploadResponse = {
@@ -142,24 +153,24 @@ globalTranslationRoutes.post('/', async (c) => {
       }))
     })
     
-  return c.json(response, 202)
+    set.status = 202
+    return response
     
   } catch (error) {
     log.error('Error processing global translation file', { error })
+    set.status = 500
     const errorResponse: ErrorResponse = {
       error: 'Failed to process global translation file'
     }
-    return c.json(errorResponse, 500)
+    return errorResponse
   }
 })
 
-globalTranslationRoutes.post('/trigger', async (c) => {
+globalTranslationRoutes.post('/trigger', async ({ body, query, set }) => {
   try {
-    const payload = (await c.req.json().catch(() => ({}))) as Record<string, unknown> | null
-    const locale = c.req.query('locale')
-      || (payload && typeof payload.locale === 'string' ? payload.locale : null)
-    const senderId = c.req.query('senderId')
-      || (payload && typeof payload.senderId === 'string' ? payload.senderId : null)
+    const payload = typeof body === 'object' && body !== null ? body as Record<string, unknown> : {}
+    const locale = query.locale || (typeof payload.locale === 'string' ? payload.locale : null)
+    const senderId = query.senderId || (typeof payload.senderId === 'string' ? payload.senderId : null)
 
     log.info('Received global translation trigger', {
       locale,
@@ -167,22 +178,25 @@ globalTranslationRoutes.post('/trigger', async (c) => {
     })
 
     if (!locale) {
+      set.status = 400
       const errorResponse: ErrorResponse = {
         error: 'Locale parameter is required'
       }
-      return c.json(errorResponse, 400)
+      return errorResponse
     }
     if (!isSupportedLocale(locale)) {
+      set.status = 400
       const errorResponse: ErrorResponse = {
         error: `Locale "${locale}" is not supported`
       }
-      return c.json(errorResponse, 400)
+      return errorResponse
     }
     if (!senderId) {
+      set.status = 400
       const errorResponse: ErrorResponse = {
         error: 'Sender identifier is required'
       }
-      return c.json(errorResponse, 400)
+      return errorResponse
     }
 
     const result = await triggerGlobalTranslation({ senderId, locale })
@@ -198,12 +212,15 @@ globalTranslationRoutes.post('/trigger', async (c) => {
         message: result.message
       })
       if (result.statusCode === 404) {
-        return c.json(errorResponse, 404)
+        set.status = 404
+        return errorResponse
       }
       if (result.statusCode === 400) {
-        return c.json(errorResponse, 400)
+        set.status = 400
+        return errorResponse
       }
-      return c.json(errorResponse, 500)
+      set.status = 500
+      return errorResponse
     }
 
     const baseFile = result.savedFiles && result.savedFiles[0]
@@ -225,13 +242,14 @@ globalTranslationRoutes.post('/trigger', async (c) => {
       savedFiles: result.savedFiles
     })
 
-    return c.json(response)
+    return response
   } catch (error) {
     log.error('Error triggering global translation', { error })
+    set.status = 500
     const errorResponse: ErrorResponse = {
       error: 'Failed to trigger global translation'
     }
-    return c.json(errorResponse, 500)
+    return errorResponse
   }
 })
 

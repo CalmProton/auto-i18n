@@ -1,4 +1,4 @@
-import { Hono } from 'hono'
+import { Elysia } from 'elysia'
 import { processContentFiles, triggerContentTranslation } from '../services/fileProcessor'
 import { extractLocale, extractSenderId, parseContentUpload } from '../utils/fileValidation'
 import type { FileUploadResponse, ErrorResponse } from '../types'
@@ -7,7 +7,7 @@ import { createScopedLogger } from '../utils/logger'
 import { extractMetadataUpdate } from '../utils/metadataInput'
 import { updateMetadata } from '../utils/jobMetadata'
 
-const contentRoutes = new Hono()
+const contentRoutes = new Elysia({ prefix: '/translate/content' })
 const log = createScopedLogger('routes:content')
 
 const SENSITIVE_HEADER_NAMES = new Set(['authorization', 'cookie', 'x-api-key'])
@@ -95,53 +95,61 @@ function serializeRequestBody(body: Record<string, unknown> | undefined): Record
 
 // Upload endpoint for content files
 // Structure: content/[locale]/[folder_name]/[files].md
-contentRoutes.post('/', async (c) => {
-  const requestUrl = new URL(c.req.url)
+contentRoutes.post('/', async ({ body, query, request, set }) => {
+  const requestUrl = new URL(request.url)
   const requestSnapshot: Record<string, unknown> = {
-    method: c.req.method,
-    url: c.req.url,
+    method: request.method,
+    url: request.url,
     path: requestUrl.pathname,
     query: Object.fromEntries(requestUrl.searchParams.entries()),
-    headers: sanitizeHeaders(c.req.raw.headers)
+    headers: sanitizeHeaders(request.headers)
   }
   let requestBody: Record<string, unknown> | undefined
   try {
-    const body = (await c.req.parseBody()) as Record<string, unknown>
-    requestBody = body
-    requestSnapshot.body = serializeRequestBody(body)
+    const formData = await request.formData()
+    const parsedBody: Record<string, unknown> = {}
+    for (const [key, value] of formData.entries()) {
+      parsedBody[key] = value
+    }
+    requestBody = parsedBody
+    requestSnapshot.body = serializeRequestBody(parsedBody)
     
     // Extract locale and sender from query or body
-    const locale = c.req.query('locale') || extractLocale(body)
-    const senderId = c.req.query('senderId') || extractSenderId(body)
+    const locale = query.locale || extractLocale(parsedBody)
+    const senderId = query.senderId || extractSenderId(parsedBody)
     log.info('Received content upload request', {
       locale,
       senderId,
-      bodyKeys: Object.keys(body ?? {}).filter((key) => key !== 'locale' && key !== 'senderId')
+      bodyKeys: Object.keys(parsedBody ?? {}).filter((key) => key !== 'locale' && key !== 'senderId')
     })
     requestSnapshot.locale = locale
     requestSnapshot.senderId = senderId
     if (!locale) {
+      set.status = 400
       const errorResponse: ErrorResponse = {
         error: 'Locale parameter is required'
       }
-      return c.json(errorResponse, 400)
+      return errorResponse
     }
     if (!isSupportedLocale(locale)) {
+      set.status = 400
       const errorResponse: ErrorResponse = {
         error: `Locale "${locale}" is not supported`
       }
-      return c.json(errorResponse, 400)
+      return errorResponse
     }
     if (!senderId) {
+      set.status = 400
       const errorResponse: ErrorResponse = {
         error: 'Sender identifier is required'
       }
-      return c.json(errorResponse, 400)
+      return errorResponse
     }
     
     // Parse and validate content upload request
-    const contentRequest = parseContentUpload(body, locale, senderId)
+    const contentRequest = parseContentUpload(parsedBody, locale, senderId)
     if (typeof contentRequest === 'string') {
+      set.status = 400
       const errorResponse: ErrorResponse = {
         error: contentRequest
       }
@@ -150,11 +158,11 @@ contentRoutes.post('/', async (c) => {
         senderId,
         reason: contentRequest
       })
-      return c.json(errorResponse, 400)
+      return errorResponse
     }
     
-    const metadataRaw = body.metadata ?? c.req.query('metadata')
-    const jobId = typeof body.jobId === 'string' ? body.jobId.trim() : 'content'
+    const metadataRaw = parsedBody.metadata ?? query.metadata
+    const jobId = typeof parsedBody.jobId === 'string' ? parsedBody.jobId.trim() : 'content'
 
     const metadataResult = extractMetadataUpdate({
       rawMetadata: metadataRaw,
@@ -168,6 +176,7 @@ contentRoutes.post('/', async (c) => {
     })
 
     if ('error' in metadataResult) {
+      set.status = 400
       const errorResponse: ErrorResponse = {
         error: metadataResult.error
       }
@@ -176,7 +185,7 @@ contentRoutes.post('/', async (c) => {
         locale,
         reason: metadataResult.error
       })
-      return c.json(errorResponse, 400)
+      return errorResponse
     }
 
     // Process the files
@@ -189,6 +198,7 @@ contentRoutes.post('/', async (c) => {
     const result = await processContentFiles(contentRequest)
     
     if (!result.success) {
+      set.status = 500
       const errorResponse: ErrorResponse = {
         error: result.message
       }
@@ -198,7 +208,7 @@ contentRoutes.post('/', async (c) => {
         message: result.message,
         request: requestSnapshot
       })
-      return c.json(errorResponse, 500)
+      return errorResponse
     }
 
     const folderSummary = result.folderSummary ?? (() => {
@@ -223,10 +233,11 @@ contentRoutes.post('/', async (c) => {
         error,
         request: requestSnapshot
       })
+      set.status = 500
       const errorResponse: ErrorResponse = {
         error: 'Failed to persist metadata for content upload'
       }
-      return c.json(errorResponse, 500)
+      return errorResponse
     }
 
     const response: FileUploadResponse = {
@@ -254,7 +265,8 @@ contentRoutes.post('/', async (c) => {
       folders: folderSummary
     })
     
-  return c.json(response, 202)
+    set.status = 202
+    return response
     
   } catch (error) {
     if (requestBody && !requestSnapshot.body) {
@@ -264,20 +276,19 @@ contentRoutes.post('/', async (c) => {
       error,
       request: requestSnapshot
     })
+    set.status = 500
     const errorResponse: ErrorResponse = {
       error: 'Failed to process content files'
     }
-    return c.json(errorResponse, 500)
+    return errorResponse
   }
 })
 
-contentRoutes.post('/trigger', async (c) => {
+contentRoutes.post('/trigger', async ({ body, query, set }) => {
   try {
-    const payload = (await c.req.json().catch(() => ({}))) as Record<string, unknown> | null
-    const locale = c.req.query('locale')
-      || (payload && typeof payload.locale === 'string' ? payload.locale : null)
-    const senderId = c.req.query('senderId')
-      || (payload && typeof payload.senderId === 'string' ? payload.senderId : null)
+    const payload = typeof body === 'object' && body !== null ? body as Record<string, unknown> : {}
+    const locale = query.locale || (typeof payload.locale === 'string' ? payload.locale : null)
+    const senderId = query.senderId || (typeof payload.senderId === 'string' ? payload.senderId : null)
 
     log.info('Received content translation trigger', {
       locale,
@@ -285,22 +296,25 @@ contentRoutes.post('/trigger', async (c) => {
     })
 
     if (!locale) {
+      set.status = 400
       const errorResponse: ErrorResponse = {
         error: 'Locale parameter is required'
       }
-      return c.json(errorResponse, 400)
+      return errorResponse
     }
     if (!isSupportedLocale(locale)) {
+      set.status = 400
       const errorResponse: ErrorResponse = {
         error: `Locale "${locale}" is not supported`
       }
-      return c.json(errorResponse, 400)
+      return errorResponse
     }
     if (!senderId) {
+      set.status = 400
       const errorResponse: ErrorResponse = {
         error: 'Sender identifier is required'
       }
-      return c.json(errorResponse, 400)
+      return errorResponse
     }
 
     const result = await triggerContentTranslation({ senderId, locale })
@@ -316,12 +330,15 @@ contentRoutes.post('/trigger', async (c) => {
         message: result.message
       })
       if (result.statusCode === 404) {
-        return c.json(errorResponse, 404)
+        set.status = 404
+        return errorResponse
       }
       if (result.statusCode === 400) {
-        return c.json(errorResponse, 400)
+        set.status = 400
+        return errorResponse
       }
-      return c.json(errorResponse, 500)
+      set.status = 500
+      return errorResponse
     }
 
     const response: FileUploadResponse = {
@@ -341,13 +358,15 @@ contentRoutes.post('/trigger', async (c) => {
       folders: result.folderSummary
     })
 
-    return c.json(response, 202)
+    set.status = 202
+    return response
   } catch (error) {
     log.error('Error triggering content translation', { error })
+    set.status = 500
     const errorResponse: ErrorResponse = {
       error: 'Failed to trigger content translation'
     }
-    return c.json(errorResponse, 500)
+    return errorResponse
   }
 })
 

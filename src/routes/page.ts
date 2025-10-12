@@ -1,4 +1,4 @@
-import { Hono } from 'hono'
+import { Elysia } from 'elysia'
 import { processPageTranslations, triggerPageTranslation } from '../services/fileProcessor'
 import { extractLocale, extractSenderId, parsePageUpload } from '../utils/fileValidation'
 import type { FileUploadResponse, ErrorResponse } from '../types'
@@ -7,45 +7,53 @@ import { createScopedLogger } from '../utils/logger'
 import { extractMetadataUpdate } from '../utils/metadataInput'
 import { updateMetadata } from '../utils/jobMetadata'
 
-const pageTranslationRoutes = new Hono()
+const pageTranslationRoutes = new Elysia({ prefix: '/translate/page' })
 const log = createScopedLogger('routes:page')
 
 // Upload endpoint for page translation files
 // Structure: multiple folders, each containing [locale].json
-pageTranslationRoutes.post('/', async (c) => {
+pageTranslationRoutes.post('/', async ({ query, request, set }) => {
   try {
-    const body = await c.req.parseBody()
+    const formData = await request.formData()
+    const parsedBody: Record<string, unknown> = {}
+    for (const [key, value] of formData.entries()) {
+      parsedBody[key] = value
+    }
     
     // Extract locale and sender from query or body
-    const locale = c.req.query('locale') || extractLocale(body)
-    const senderId = c.req.query('senderId') || extractSenderId(body)
+    const locale = query.locale || extractLocale(parsedBody)
+    const senderId = query.senderId || extractSenderId(parsedBody)
     log.info('Received page translation upload', {
       locale,
       senderId,
-      bodyKeys: Object.keys(body ?? {}).filter((key) => key !== 'locale' && key !== 'senderId')
+      bodyKeys: Object.keys(parsedBody ?? {}).filter((key) => key !== 'locale' && key !== 'senderId')
     })
     if (!locale) {
+      set.status = 400
       const errorResponse: ErrorResponse = {
         error: 'Locale parameter is required'
       }
-      return c.json(errorResponse, 400)
+      return errorResponse
     }
     if (!isSupportedLocale(locale)) {
+      set.status = 400
       const errorResponse: ErrorResponse = {
         error: `Locale "${locale}" is not supported`
       }
-      return c.json(errorResponse, 400)
+      return errorResponse
     }
     if (!senderId) {
+      set.status = 400
       const errorResponse: ErrorResponse = {
         error: 'Sender identifier is required'
       }
-      return c.json(errorResponse, 400)
+      return errorResponse
     }
     
     // Parse and validate page upload request
-  const pageRequest = parsePageUpload(body, locale, senderId)
+  const pageRequest = parsePageUpload(parsedBody, locale, senderId)
     if (typeof pageRequest === 'string') {
+      set.status = 400
       const errorResponse: ErrorResponse = {
         error: pageRequest
       }
@@ -54,11 +62,11 @@ pageTranslationRoutes.post('/', async (c) => {
         senderId,
         reason: pageRequest
       })
-      return c.json(errorResponse, 400)
+      return errorResponse
     }
     
-    const metadataRaw = body.metadata ?? c.req.query('metadata')
-    const jobId = typeof body.jobId === 'string' ? body.jobId.trim() : 'page'
+    const metadataRaw = parsedBody.metadata ?? query.metadata
+    const jobId = typeof parsedBody.jobId === 'string' ? parsedBody.jobId.trim() : 'page'
 
     const metadataResult = extractMetadataUpdate({
       rawMetadata: metadataRaw,
@@ -72,6 +80,7 @@ pageTranslationRoutes.post('/', async (c) => {
     })
 
     if ('error' in metadataResult) {
+      set.status = 400
       const errorResponse: ErrorResponse = {
         error: metadataResult.error
       }
@@ -80,7 +89,7 @@ pageTranslationRoutes.post('/', async (c) => {
         locale,
         reason: metadataResult.error
       })
-      return c.json(errorResponse, 400)
+      return errorResponse
     }
 
     // Process the files
@@ -94,6 +103,7 @@ pageTranslationRoutes.post('/', async (c) => {
     const result = await processPageTranslations(pageRequest)
     
     if (!result.success) {
+      set.status = 500
       const errorResponse: ErrorResponse = {
         error: result.message
       }
@@ -102,7 +112,7 @@ pageTranslationRoutes.post('/', async (c) => {
         locale: pageRequest.locale,
         message: result.message
       })
-      return c.json(errorResponse, 500)
+      return errorResponse
     }
     
     try {
@@ -113,10 +123,11 @@ pageTranslationRoutes.post('/', async (c) => {
         locale,
         error
       })
+      set.status = 500
       const errorResponse: ErrorResponse = {
         error: 'Failed to persist metadata for page upload'
       }
-      return c.json(errorResponse, 500)
+      return errorResponse
     }
 
     const response: FileUploadResponse = {
@@ -137,24 +148,24 @@ pageTranslationRoutes.post('/', async (c) => {
       folders: pageRequest.folders.map((f) => f.folderName)
     })
     
-  return c.json(response, 202)
+    set.status = 202
+    return response
     
   } catch (error) {
     log.error('Error processing page translation files', { error })
+    set.status = 500
     const errorResponse: ErrorResponse = {
       error: 'Failed to process page translation files'
     }
-    return c.json(errorResponse, 500)
+    return errorResponse
   }
 })
 
-pageTranslationRoutes.post('/trigger', async (c) => {
+pageTranslationRoutes.post('/trigger', async ({ body, query, set }) => {
   try {
-    const payload = await c.req.json().catch(() => ({})) as Record<string, unknown> | null
-    const locale = c.req.query('locale')
-      || (payload && typeof payload.locale === 'string' ? payload.locale : null)
-    const senderId = c.req.query('senderId')
-      || (payload && typeof payload.senderId === 'string' ? payload.senderId : null)
+    const payload = typeof body === 'object' && body !== null ? body as Record<string, unknown> : {}
+    const locale = query.locale || (typeof payload.locale === 'string' ? payload.locale : null)
+    const senderId = query.senderId || (typeof payload.senderId === 'string' ? payload.senderId : null)
 
     log.info('Received page translation trigger', {
       locale,
@@ -162,22 +173,25 @@ pageTranslationRoutes.post('/trigger', async (c) => {
     })
 
     if (!locale) {
+      set.status = 400
       const errorResponse: ErrorResponse = {
         error: 'Locale parameter is required'
       }
-      return c.json(errorResponse, 400)
+      return errorResponse
     }
     if (!isSupportedLocale(locale)) {
+      set.status = 400
       const errorResponse: ErrorResponse = {
         error: `Locale "${locale}" is not supported`
       }
-      return c.json(errorResponse, 400)
+      return errorResponse
     }
     if (!senderId) {
+      set.status = 400
       const errorResponse: ErrorResponse = {
         error: 'Sender identifier is required'
       }
-      return c.json(errorResponse, 400)
+      return errorResponse
     }
 
     const result = await triggerPageTranslation({ senderId, locale })
@@ -193,12 +207,15 @@ pageTranslationRoutes.post('/trigger', async (c) => {
         message: result.message
       })
       if (result.statusCode === 404) {
-        return c.json(errorResponse, 404)
+        set.status = 404
+        return errorResponse
       }
       if (result.statusCode === 400) {
-        return c.json(errorResponse, 400)
+        set.status = 400
+        return errorResponse
       }
-      return c.json(errorResponse, 500)
+      set.status = 500
+      return errorResponse
     }
 
     const response: FileUploadResponse = {
@@ -217,13 +234,14 @@ pageTranslationRoutes.post('/trigger', async (c) => {
       savedFiles: result.savedFiles
     })
 
-    return c.json(response)
+    return response
   } catch (error) {
     log.error('Error triggering page translation', { error })
+    set.status = 500
     const errorResponse: ErrorResponse = {
       error: 'Failed to trigger page translation'
     }
-    return c.json(errorResponse, 500)
+    return errorResponse
   }
 })
 
