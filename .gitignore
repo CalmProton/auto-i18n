@@ -4,3 +4,6 @@ tmp
 .env
 TODO.md
 .DS_Store
+
+# client build
+client/dist

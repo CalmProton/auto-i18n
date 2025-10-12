@@ -1,7 +1,14 @@
 import { Elysia } from 'elysia'
+import { cors } from '@elysiajs/cors'
 import routes from './routes'
 
 const app = new Elysia()
+
+// Enable CORS for the Vue client
+app.use(cors({
+  origin: true, // Allow all origins in development
+  credentials: true,
+}))
 
 // Root endpoint
 app.get('/', () => {

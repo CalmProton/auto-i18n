@@ -2,6 +2,34 @@
 
 Auto-i18n receives localization artifacts from CI pipelines, stores them in a temporary workspace, runs machine translation, and now loops changes back to the source repository via the GitHub API.
 
+## Quick Start
+
+### Start the API Server
+
+```bash
+bun run dev
+```
+
+The API server runs on `http://localhost:3001` (configurable via `PORT` environment variable).
+
+### Start the Vue Client (Optional)
+
+For a web-based interface to interact with the API:
+
+```bash
+bun run client
+```
+
+The Vue client runs on `http://localhost:5173` and provides an intuitive interface for uploading files, triggering translations, checking batch status, and creating GitHub pull requests.
+
+**Tech Stack:**
+- Vue 3 with Composition API
+- Tailwind CSS v4
+- shadcn-vue components
+- Full TypeScript support
+
+See [`client/README.md`](./client/README.md) for more details and [`client/TAILWIND_SETUP.md`](./client/TAILWIND_SETUP.md) for UI customization.
+
 ## OpenAI batch translation
 
 Use the batch endpoints to prepare large translation jobs for OpenAI's asynchronous Batch API (50% discounted pricing, 24-hour SLA).
