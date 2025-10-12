@@ -8,6 +8,7 @@ import { api } from '../lib/api-client'
 import type {
   Batch,
   BatchesResponse,
+  BatchDetailResponse,
   BatchStatus,
   ProcessBatchRequest,
   RetryBatchRequest,
@@ -15,7 +16,7 @@ import type {
 import { useToast } from './useToast'
 
 const batches = ref<Batch[]>([])
-const currentBatch = ref<any>(null) // Will be typed properly when we have batch detail response
+const currentBatch = ref<BatchDetailResponse | null>(null)
 const loading = ref(false)
 const error = ref<string | null>(null)
 const pagination = ref({
@@ -75,7 +76,7 @@ export function useBatches() {
     error.value = null
 
     try {
-      const response = await api.get<any>(`/api/batches/${senderId}/${batchId}`)
+      const response = await api.get<BatchDetailResponse>(`/api/batches/${senderId}/${batchId}`)
       currentBatch.value = response
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to fetch batch details'

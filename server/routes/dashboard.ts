@@ -4,6 +4,7 @@
  */
 
 import { Elysia, t } from 'elysia'
+import { readFileSync } from 'fs'
 import { createScopedLogger } from '../utils/logger'
 import {
   listAllUploads,
@@ -256,9 +257,51 @@ dashboardRoutes.get('/batches/:senderId/:batchId', async ({ params }) => {
       },
     }
 
+    // Parse unique errors if error file exists
+    let uniqueErrors: Array<{ code: string; type: string; message: string; count: number }> = []
+    if (batchInfo.hasErrors && batchInfo.errorFileName) {
+      try {
+        const errorPath = join(batchDir, batchInfo.errorFileName)
+        const errorContent = readFileSync(errorPath, 'utf-8')
+        const errorLines = errorContent.split('\n').filter((l: string) => l.trim())
+        
+        // Group errors by code and type
+        const errorMap = new Map<string, { code: string; type: string; message: string; count: number }>()
+        
+        for (const line of errorLines) {
+          try {
+            const errorEntry = JSON.parse(line)
+            const errorData = errorEntry.response?.body?.error
+            
+            if (errorData) {
+              const key = `${errorData.code || 'unknown'}_${errorData.type || 'unknown'}`
+              
+              if (errorMap.has(key)) {
+                errorMap.get(key)!.count++
+              } else {
+                errorMap.set(key, {
+                  code: errorData.code || 'unknown',
+                  type: errorData.type || 'unknown',
+                  message: errorData.message || 'Unknown error',
+                  count: 1,
+                })
+              }
+            }
+          } catch {
+            // Skip malformed lines
+          }
+        }
+        
+        uniqueErrors = Array.from(errorMap.values()).sort((a, b) => b.count - a.count)
+      } catch (error) {
+        log.error(`Error parsing error file for ${senderId}/${batchId}:`, error)
+      }
+    }
+
     return {
       batch: batchInfo,
       files,
+      uniqueErrors,
     }
   } catch (error) {
     log.error(`Error getting batch ${params.senderId}/${params.batchId}:`, error)

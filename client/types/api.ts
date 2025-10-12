@@ -53,6 +53,13 @@ export interface BatchProgress {
   errorCount?: number
 }
 
+export interface BatchError {
+  code: string
+  type: string
+  message: string
+  count: number
+}
+
 export interface Batch {
   batchId: string
   senderId: string
@@ -163,6 +170,17 @@ export interface UploadDetailResponse {
 export interface BatchesResponse {
   batches: Batch[]
   pagination: Pagination
+}
+
+export interface BatchDetailResponse {
+  batch: Batch
+  files: {
+    input: { exists: boolean; path: string }
+    output: { exists: boolean; path: string }
+    manifest: { exists: boolean; path: string }
+    error: { exists: boolean; path: string; errorCount?: number }
+  }
+  uniqueErrors?: BatchError[]
 }
 
 export interface TranslationsResponse {
