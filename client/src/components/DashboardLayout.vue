@@ -5,7 +5,7 @@
       <div class="container mx-auto px-6 py-4">
         <div class="flex items-center justify-between">
           <div class="flex items-center gap-3">
-            <Icon icon="mdi:translate" :size="32" color="3b82f6" />
+            <Languages class="h-8 w-8 text-primary" />
             <div>
               <h1 class="text-3xl font-bold">Auto-i18n Dashboard</h1>
               <p class="text-sm text-muted-foreground mt-1">
@@ -14,16 +14,23 @@
             </div>
           </div>
           
-          <div class="flex items-center gap-4">
-            <Button 
-              variant="ghost" 
-              size="sm" 
-              @click="showHelp"
-              title="Keyboard shortcuts (Press ?)"
-            >
-              <Icon icon="mdi:keyboard" :size="20" />
-            </Button>
+          <div class="flex items-center gap-2">
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button 
+                  variant="ghost" 
+                  size="icon" 
+                  @click="showHelp"
+                >
+                  <Keyboard class="h-4 w-4" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>
+                <p>Keyboard shortcuts <Kbd>?</Kbd></p>
+              </TooltipContent>
+            </Tooltip>
             <Button variant="outline" size="sm" @click="handleLogout" v-if="isAuthenticated">
+              <LogOut class="h-4 w-4 mr-2" />
               Logout
             </Button>
           </div>
@@ -41,19 +48,19 @@
       <Tabs v-model="activeTab" class="w-full">
         <TabsList class="grid w-full grid-cols-4">
           <TabsTrigger value="uploads" class="flex items-center gap-2">
-            <Icon icon="mdi:upload" :size="18" />
+            <Upload class="h-4 w-4" />
             <span>Uploads</span>
           </TabsTrigger>
           <TabsTrigger value="batches" class="flex items-center gap-2">
-            <Icon icon="mdi:progress-clock" :size="18" />
+            <Timer class="h-4 w-4" />
             <span>Batches</span>
           </TabsTrigger>
           <TabsTrigger value="translations" class="flex items-center gap-2">
-            <Icon icon="mdi:translate" :size="18" />
+            <Languages class="h-4 w-4" />
             <span>Translations</span>
           </TabsTrigger>
           <TabsTrigger value="github" class="flex items-center gap-2">
-            <Icon icon="mdi:github" :size="18" />
+            <Github class="h-4 w-4" />
             <span>GitHub</span>
           </TabsTrigger>
         </TabsList>
@@ -78,9 +85,11 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
 import { useAuth, useKeyboardShortcuts } from '@/composables'
+import { Languages, Upload, Timer, Github, Keyboard, LogOut } from 'lucide-vue-next'
 import { Button } from '@/components/ui/button'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import Icon from './Icon.vue'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
+import { Kbd } from '@/components/ui/kbd'
 import StatsOverview from './StatsOverview.vue'
 import UploadsTab from './UploadsTab.vue'
 import BatchesTab from './BatchesTab.vue'

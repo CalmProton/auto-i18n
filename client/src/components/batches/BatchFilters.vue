@@ -1,28 +1,32 @@
 <template>
   <Card>
     <CardHeader>
-      <CardTitle>Filters</CardTitle>
+      <CardTitle class="flex items-center gap-2">
+        <Filter class="h-4 w-4" />
+        Filters
+      </CardTitle>
     </CardHeader>
     <CardContent>
       <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
         <!-- Status Filter -->
         <div class="space-y-2">
           <Label for="status-filter">Status</Label>
-          <select
-            id="status-filter"
-            :value="statusFilter"
-            @change="$emit('update:statusFilter', ($event.target as HTMLSelectElement).value)"
-            class="w-full px-3 py-2 border rounded-md bg-background"
-          >
-            <option value="all">All Statuses</option>
-            <option value="pending">Pending</option>
-            <option value="submitted">Submitted</option>
-            <option value="processing">Processing</option>
-            <option value="completed">Completed</option>
-            <option value="failed">Failed</option>
-            <option value="cancelled">Cancelled</option>
-            <option value="partially_failed">Partially Failed</option>
-          </select>
+          <Select :model-value="statusFilter" @update:model-value="(val) => $emit('update:statusFilter', val as string)">
+            <SelectTrigger id="status-filter">
+              <SelectValue placeholder="Select status" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Statuses</SelectItem>
+              <SelectSeparator />
+              <SelectItem value="pending">Pending</SelectItem>
+              <SelectItem value="submitted">Submitted</SelectItem>
+              <SelectItem value="processing">Processing</SelectItem>
+              <SelectItem value="completed">Completed</SelectItem>
+              <SelectItem value="failed">Failed</SelectItem>
+              <SelectItem value="cancelled">Cancelled</SelectItem>
+              <SelectItem value="partially_failed">Partially Failed</SelectItem>
+            </SelectContent>
+          </Select>
         </div>
 
         <!-- Sender Filter -->
@@ -43,6 +47,7 @@
             @click="$emit('clearFilters')"
             class="w-full"
           >
+            <X class="h-4 w-4 mr-2" />
             Clear Filters
           </Button>
         </div>
@@ -52,10 +57,19 @@
 </template>
 
 <script setup lang="ts">
+import { Filter, X } from 'lucide-vue-next'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Label } from '@/components/ui/label'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectSeparator,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import type { BatchStatus } from '@/types/api'
 
 defineProps<{

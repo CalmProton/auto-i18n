@@ -1,54 +1,81 @@
 <template>
-  <div
-    v-if="isOpen"
-    class="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
-    @click.self="close"
-  >
-    <div class="bg-background border rounded-lg shadow-lg max-w-md w-full mx-4 p-6">
-      <div class="flex items-center justify-between mb-4">
-        <div class="flex items-center gap-2">
-          <Icon icon="mdi:keyboard" :size="24" color="3b82f6" />
-          <h2 class="text-xl font-bold">Keyboard Shortcuts</h2>
-        </div>
-        <Button @click="close" variant="ghost" size="sm">
-          <Icon icon="mdi:close" :size="20" />
-        </Button>
-      </div>
+  <Dialog v-model:open="isOpen">
+    <DialogContent class="sm:max-w-md">
+      <DialogHeader>
+        <DialogTitle class="flex items-center gap-2">
+          <Keyboard class="h-5 w-5 text-primary" />
+          Keyboard Shortcuts
+        </DialogTitle>
+        <DialogDescription>
+          Quickly navigate through the dashboard using these keyboard shortcuts
+        </DialogDescription>
+      </DialogHeader>
 
       <div class="space-y-3">
-        <div class="flex items-center justify-between py-2 border-b">
+        <div class="flex items-center justify-between py-2">
           <span class="text-sm">Go to Uploads tab</span>
-          <kbd class="px-2 py-1 text-xs font-mono bg-muted rounded">Alt + 1</kbd>
+          <div class="flex gap-1">
+            <Kbd>Alt</Kbd>
+            <span class="text-muted-foreground">+</span>
+            <Kbd>1</Kbd>
+          </div>
         </div>
-        <div class="flex items-center justify-between py-2 border-b">
+        <Separator />
+        <div class="flex items-center justify-between py-2">
           <span class="text-sm">Go to Batches tab</span>
-          <kbd class="px-2 py-1 text-xs font-mono bg-muted rounded">Alt + 2</kbd>
+          <div class="flex gap-1">
+            <Kbd>Alt</Kbd>
+            <span class="text-muted-foreground">+</span>
+            <Kbd>2</Kbd>
+          </div>
         </div>
-        <div class="flex items-center justify-between py-2 border-b">
+        <Separator />
+        <div class="flex items-center justify-between py-2">
           <span class="text-sm">Go to Translations tab</span>
-          <kbd class="px-2 py-1 text-xs font-mono bg-muted rounded">Alt + 3</kbd>
+          <div class="flex gap-1">
+            <Kbd>Alt</Kbd>
+            <span class="text-muted-foreground">+</span>
+            <Kbd>3</Kbd>
+          </div>
         </div>
-        <div class="flex items-center justify-between py-2 border-b">
+        <Separator />
+        <div class="flex items-center justify-between py-2">
           <span class="text-sm">Go to GitHub tab</span>
-          <kbd class="px-2 py-1 text-xs font-mono bg-muted rounded">Alt + 4</kbd>
+          <div class="flex gap-1">
+            <Kbd>Alt</Kbd>
+            <span class="text-muted-foreground">+</span>
+            <Kbd>4</Kbd>
+          </div>
         </div>
-        <div class="flex items-center justify-between py-2 border-b">
+        <Separator />
+        <div class="flex items-center justify-between py-2">
           <span class="text-sm">Show this help</span>
-          <kbd class="px-2 py-1 text-xs font-mono bg-muted rounded">?</kbd>
+          <Kbd>?</Kbd>
         </div>
       </div>
 
-      <div class="mt-6 text-xs text-muted-foreground text-center">
-        Shortcuts work when not typing in input fields
-      </div>
-    </div>
-  </div>
+      <DialogFooter class="sm:justify-start">
+        <p class="text-xs text-muted-foreground">
+          Shortcuts work when not typing in input fields
+        </p>
+      </DialogFooter>
+    </DialogContent>
+  </Dialog>
 </template>
 
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted } from 'vue'
-import { Button } from '@/components/ui/button'
-import Icon from './Icon.vue'
+import { Keyboard } from 'lucide-vue-next'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
+import { Kbd } from '@/components/ui/kbd'
+import { Separator } from '@/components/ui/separator'
 
 const isOpen = ref(false)
 

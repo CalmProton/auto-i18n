@@ -10,34 +10,44 @@
       </div>
       <div class="flex gap-2">
         <Button variant="outline" @click="refresh" :disabled="loading">
+          <RefreshCw class="h-4 w-4 mr-2" :class="{ 'animate-spin': loading }" />
           {{ loading ? 'Refreshing...' : 'Refresh' }}
         </Button>
         <Button @click="showCreateUpload = true">
-          + New Upload
+          <Plus class="h-4 w-4 mr-2" />
+          New Upload
         </Button>
       </div>
     </div>
 
     <!-- Loading State -->
     <div v-if="loading && !uploads.length" class="flex items-center justify-center py-12">
-      <div class="text-center space-y-2">
-        <p class="text-lg font-medium">Loading uploads...</p>
-        <p class="text-sm text-muted-foreground">Please wait</p>
+      <div class="text-center space-y-4">
+        <Spinner class="h-8 w-8 mx-auto" />
+        <div>
+          <p class="text-lg font-medium">Loading uploads...</p>
+          <p class="text-sm text-muted-foreground">Please wait</p>
+        </div>
       </div>
     </div>
 
     <!-- Error State -->
     <Alert v-else-if="error" variant="destructive">
+      <AlertCircle class="h-4 w-4" />
       <AlertDescription>{{ error }}</AlertDescription>
     </Alert>
 
     <!-- Empty State -->
     <div v-else-if="!uploads.length" class="flex items-center justify-center py-12 border-2 border-dashed rounded-lg">
-      <div class="text-center space-y-2">
-        <p class="text-lg font-medium">No uploads yet</p>
-        <p class="text-sm text-muted-foreground">Create your first upload session to get started</p>
-        <Button @click="showCreateUpload = true" class="mt-4">
-          + Create Upload
+      <div class="text-center space-y-4">
+        <UploadCloud class="h-12 w-12 mx-auto text-muted-foreground" />
+        <div>
+          <p class="text-lg font-medium">No uploads yet</p>
+          <p class="text-sm text-muted-foreground">Create your first upload session to get started</p>
+        </div>
+        <Button @click="showCreateUpload = true">
+          <Plus class="h-4 w-4 mr-2" />
+          Create Upload
         </Button>
       </div>
     </div>
@@ -48,41 +58,51 @@
     <!-- Pagination -->
     <div v-if="pagination && pagination.hasMore" class="flex justify-center">
       <Button variant="outline" @click="loadMore" :disabled="loading">
+        <ChevronDown class="h-4 w-4 mr-2" />
         Load More
       </Button>
     </div>
 
-    <!-- Create Upload Dialog (placeholder for now) -->
-    <div v-if="showCreateUpload" class="fixed inset-0 bg-black/50 flex items-center justify-center z-50" @click.self="showCreateUpload = false">
-      <Card class="w-full max-w-2xl m-4">
-        <CardHeader>
-          <CardTitle>Create New Upload</CardTitle>
-          <CardDescription>Upload files for translation</CardDescription>
-        </CardHeader>
-        <CardContent>
+    <!-- Create Upload Dialog -->
+    <Dialog v-model:open="showCreateUpload">
+      <DialogContent class="sm:max-w-2xl">
+        <DialogHeader>
+          <DialogTitle>Create New Upload</DialogTitle>
+          <DialogDescription>Upload files for translation</DialogDescription>
+        </DialogHeader>
+        <div class="py-4">
           <p class="text-muted-foreground">
             This will integrate the existing upload forms (ContentUpload, GlobalUpload, PageUpload).
           </p>
           <p class="text-sm text-muted-foreground mt-2">
             For now, use the original upload interface or we'll integrate it here.
           </p>
-        </CardContent>
-        <div class="px-6 pb-6">
-          <Button @click="showCreateUpload = false" class="w-full">
+        </div>
+        <DialogFooter>
+          <Button variant="outline" @click="showCreateUpload = false">
             Close
           </Button>
-        </div>
-      </Card>
-    </div>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { useUploads } from '@/composables'
+import { RefreshCw, Plus, AlertCircle, UploadCloud, ChevronDown } from 'lucide-vue-next'
 import { Button } from '@/components/ui/button'
 import { Alert, AlertDescription } from '@/components/ui/alert'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
+import { Spinner } from '@/components/ui/spinner'
 import UploadsList from './uploads/UploadsList.vue'
 
 const { uploads, pagination, loading, error, fetchUploads } = useUploads()

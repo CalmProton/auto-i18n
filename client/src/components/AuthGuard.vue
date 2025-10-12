@@ -3,7 +3,7 @@
     <Card class="w-full max-w-md">
       <CardHeader>
         <CardTitle class="flex items-center gap-2">
-          <Icon icon="mdi:lock" :size="24" />
+          <Lock class="h-6 w-6" />
           Authentication Required
         </CardTitle>
         <CardDescription>
@@ -24,10 +24,12 @@
           </div>
           
           <Alert v-if="error" variant="destructive">
+            <AlertCircle class="h-4 w-4" />
             <AlertDescription>{{ error }}</AlertDescription>
           </Alert>
           
           <Button type="submit" class="w-full" :disabled="isValidating || !accessKey">
+            <Loader2 v-if="isValidating" class="h-4 w-4 mr-2 animate-spin" />
             {{ isValidating ? 'Validating...' : 'Login' }}
           </Button>
         </form>
@@ -41,8 +43,8 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { useAuth } from '@/composables'
+import { Lock, AlertCircle, Loader2 } from 'lucide-vue-next'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import Icon from './Icon.vue'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Button } from '@/components/ui/button'

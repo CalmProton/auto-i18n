@@ -9,21 +9,24 @@
         </p>
       </div>
       <Button @click="refreshSessions" :disabled="loading" variant="outline">
-        <Icon icon="mdi:refresh" :size="16" class="mr-2" />
+        <RefreshCw class="h-4 w-4 mr-2" :class="{ 'animate-spin': loading }" />
         {{ loading ? 'Refreshing...' : 'Refresh' }}
       </Button>
     </div>
 
     <!-- Loading State -->
     <div v-if="loading && !sessions.length" class="space-y-4">
-      <div class="h-32 bg-muted animate-pulse rounded-lg" />
-      <div class="h-32 bg-muted animate-pulse rounded-lg" />
+      <Skeleton class="h-32 w-full rounded-lg" />
+      <Skeleton class="h-32 w-full rounded-lg" />
     </div>
 
     <!-- Error State -->
     <Alert v-else-if="error" variant="destructive">
-      <p class="font-semibold">Failed to load GitHub sessions</p>
-      <p class="text-sm">{{ error }}</p>
+      <AlertCircle class="h-4 w-4" />
+      <AlertDescription>
+        <p class="font-semibold">Failed to load GitHub sessions</p>
+        <p class="text-sm">{{ error }}</p>
+      </AlertDescription>
     </Alert>
 
     <!-- Empty State -->
@@ -31,7 +34,7 @@
       v-else-if="!sessions.length"
       class="flex flex-col items-center justify-center py-16 border-2 border-dashed rounded-lg"
     >
-      <Icon icon="mdi:github" :size="64" color="9ca3af" class="mb-4" />
+      <Github class="h-16 w-16 mb-4 text-muted-foreground" />
       <h3 class="text-lg font-semibold mb-2">No Sessions Ready</h3>
       <p class="text-sm text-muted-foreground text-center max-w-md">
         Complete translations first, then they'll appear here ready to create pull requests.
@@ -59,9 +62,10 @@
 <script setup lang="ts">
 import { computed, onMounted } from 'vue'
 import { useGitHub, useToast } from '@/composables'
+import { RefreshCw, AlertCircle, Github } from 'lucide-vue-next'
 import { Button } from '@/components/ui/button'
-import { Alert } from '@/components/ui/alert'
-import Icon from './Icon.vue'
+import { Alert, AlertDescription } from '@/components/ui/alert'
+import { Skeleton } from '@/components/ui/skeleton'
 import ReadySessions from './github/ReadySessions.vue'
 import ExistingPRsList from './github/ExistingPRsList.vue'
 import type { GitHubSession } from '@/types/api'
