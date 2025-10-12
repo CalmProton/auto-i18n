@@ -219,6 +219,7 @@ dashboardRoutes.get(
           t.Literal('completed'),
           t.Literal('failed'),
           t.Literal('cancelled'),
+          t.Literal('partially_failed'),
         ])
       ),
       senderId: t.Optional(t.String()),
@@ -298,18 +299,40 @@ dashboardRoutes.post('/batches/:senderId/:batchId/retry', async ({ params, body 
     const { senderId, batchId } = params
     const { errorFileName, model } = body as { errorFileName?: string; model?: string }
 
-    // Forward to the existing retry logic
-    return {
-      success: true,
-      message: 'Retry batch endpoint - implementation pending',
+    // Get batch info to find the error file name if not provided
+    const batchInfo = getBatchInfo(senderId, batchId)
+    if (!batchInfo) {
+      return { error: 'Batch not found' }
+    }
+
+    const actualErrorFileName = errorFileName || batchInfo.errorFileName
+    if (!actualErrorFileName) {
+      return { error: 'No error file found for this batch' }
+    }
+
+    // Import the createRetryBatch function
+    const { createRetryBatch } = await import('../services/translation/openaiBatchService')
+
+    const result = await createRetryBatch({
       senderId,
       originalBatchId: batchId,
-      errorFileName,
+      errorFileName: actualErrorFileName,
       model,
+    })
+
+    return {
+      success: true,
+      message: 'Retry batch created successfully',
+      batchId: result.batchId,
+      originalBatchId: batchId,
+      requestCount: result.requestCount,
+      failedRequestCount: result.failedRequestCount,
+      model: result.manifest.model,
     }
   } catch (error) {
     log.error(`Error creating retry batch for ${params.senderId}/${params.batchId}:`, error)
-    return { error: 'Failed to create retry batch' }
+    const message = error instanceof Error ? error.message : 'Failed to create retry batch'
+    return { error: message }
   }
 })
 

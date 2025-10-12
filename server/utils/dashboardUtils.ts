@@ -75,9 +75,31 @@ function countFilesByType(dir: string): FileCount {
   for (const type of types) {
     const typeDir = join(dir, type)
     if (existsSync(typeDir)) {
-      const files = readdirSync(typeDir, { withFileTypes: true })
-      count[type] = files.filter((f) => f.isFile()).length
+      count[type] = countFilesRecursive(typeDir)
       count.total += count[type]
+    }
+  }
+
+  return count
+}
+
+/**
+ * Recursively count files in a directory
+ */
+function countFilesRecursive(dir: string): number {
+  if (!existsSync(dir)) {
+    return 0
+  }
+
+  let count = 0
+  const entries = readdirSync(dir, { withFileTypes: true })
+
+  for (const entry of entries) {
+    const fullPath = join(dir, entry.name)
+    if (entry.isFile()) {
+      count++
+    } else if (entry.isDirectory()) {
+      count += countFilesRecursive(fullPath)
     }
   }
 
@@ -230,14 +252,39 @@ export function getBatchInfo(senderId: string, batchId: string): Batch | null {
     // Check for input/output/error files
     const inputPath = join(batchDir, 'batch_input.jsonl')
     const outputPath = join(batchDir, 'batch_output.jsonl')
-    const errorPath = join(batchDir, `batch_${manifest.openai?.batchId}_error.jsonl`)
+    
+    // Find error file - it may have different naming patterns
+    let errorPath: string | undefined
+    let errorFileName: string | undefined
+    if (manifest.openai?.batchId) {
+      const errorFile = `batch_${manifest.openai.batchId}_error.jsonl`
+      const errorFullPath = join(batchDir, errorFile)
+      if (existsSync(errorFullPath)) {
+        errorPath = errorFullPath
+        errorFileName = errorFile
+      }
+    }
+    
+    // Also check for any file ending with _error.jsonl
+    if (!errorPath) {
+      try {
+        const files = readdirSync(batchDir)
+        const errorFile = files.find(f => f.endsWith('_error.jsonl'))
+        if (errorFile) {
+          errorPath = join(batchDir, errorFile)
+          errorFileName = errorFile
+        }
+      } catch {
+        // Ignore
+      }
+    }
 
     const hasOutput = existsSync(outputPath)
-    const hasErrors = existsSync(errorPath)
+    const hasErrors = !!errorPath && existsSync(errorPath)
 
     // Count errors if error file exists
     let errorCount = 0
-    if (hasErrors) {
+    if (hasErrors && errorPath) {
       try {
         const errorContent = readFileSync(errorPath, 'utf-8')
         const lines = errorContent.split('\n').filter((l) => l.trim())
@@ -255,13 +302,27 @@ export function getBatchInfo(senderId: string, batchId: string): Batch | null {
     const metadata = readJsonFile<TranslationMetadataFile>(metadataPath)
     const repositoryName = metadata?.repository ? `${metadata.repository.owner}/${metadata.repository.name}` : undefined
 
+    // Determine actual status based on errors and presence of files
+    let actualStatus: BatchStatus = (manifest.status as BatchStatus) || 'pending'
+    
+    // If we have an error file, the batch was processed (even if not via OpenAI API)
+    if (hasErrors && errorCount > 0) {
+      if (manifest.status === 'completed' || manifest.status === 'draft' || !manifest.status) {
+        // If we have errors and batch is completed/draft/unknown, mark as partially failed or failed
+        actualStatus = errorCount === manifest.totalRequests ? 'failed' : 'partially_failed'
+      }
+    } else if (hasOutput && !manifest.status) {
+      // If we have output but no status, mark as completed
+      actualStatus = 'completed'
+    }
+
     // Calculate progress (for OpenAI batches, this would come from API status)
     const progress =
-      manifest.status === 'completed'
+      manifest.status === 'completed' || actualStatus === 'failed' || actualStatus === 'partially_failed'
         ? {
-            completed: manifest.totalRequests,
+            completed: manifest.totalRequests - errorCount,
             total: manifest.totalRequests,
-            percentage: 100,
+            percentage: Math.round(((manifest.totalRequests - errorCount) / manifest.totalRequests) * 100),
             errorCount,
           }
         : undefined
@@ -273,7 +334,7 @@ export function getBatchInfo(senderId: string, batchId: string): Batch | null {
       batchId,
       senderId,
       repositoryName,
-      status: (manifest.status as BatchStatus) || 'pending',
+      status: actualStatus,
       jobType: 'openai-batch', // Currently only OpenAI batches are supported
       sourceLocale: manifest.sourceLocale,
       targetLocales: manifest.targetLocales,
@@ -290,6 +351,7 @@ export function getBatchInfo(senderId: string, batchId: string): Batch | null {
       completedAt: undefined, // TODO: Get from OpenAI status
       hasOutput,
       hasErrors,
+      errorFileName,
       outputProcessed,
     }
   } catch (error) {
@@ -550,28 +612,40 @@ export function deleteBatch(senderId: string, batchId: string): void {
 }
 
 /**
- * List files in a directory
+ * List files in a directory recursively
  */
 export function listFiles(dir: string): FileInfo[] {
   if (!existsSync(dir)) {
     return []
   }
 
-  try {
-    const files = readdirSync(dir, { withFileTypes: true }).filter((f) => f.isFile())
+  const files: FileInfo[] = []
 
-    return files.map((file) => {
-      const filePath = join(dir, file.name)
-      const stats = statSync(filePath)
-      return {
-        name: file.name,
-        size: stats.size,
-        path: filePath,
-        lastModified: stats.mtime.toISOString(),
+  function listFilesRecursive(currentDir: string, basePath: string = '') {
+    try {
+      const entries = readdirSync(currentDir, { withFileTypes: true })
+
+      for (const entry of entries) {
+        const fullPath = join(currentDir, entry.name)
+        const relativePath = basePath ? join(basePath, entry.name) : entry.name
+
+        if (entry.isFile()) {
+          const stats = statSync(fullPath)
+          files.push({
+            name: relativePath, // Use relative path to show folder structure
+            size: stats.size,
+            path: fullPath,
+            lastModified: stats.mtime.toISOString(),
+          })
+        } else if (entry.isDirectory()) {
+          listFilesRecursive(fullPath, relativePath)
+        }
       }
-    })
-  } catch (error) {
-    log.error(`Error listing files in ${dir}:`, error)
-    return []
+    } catch (error) {
+      log.error(`Error listing files in ${currentDir}:`, error)
+    }
   }
+
+  listFilesRecursive(dir)
+  return files
 }

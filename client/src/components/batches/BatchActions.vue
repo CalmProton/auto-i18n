@@ -33,14 +33,47 @@
     
     <Button
       v-if="canRetry"
-      variant="outline"
+      variant="default"
       size="sm"
-      @click="handleRetry"
+      @click="showRetryDialog = true"
       :disabled="isRetrying"
     >
       <Icon v-if="!isRetrying" icon="mdi:reload" :size="18" class="mr-1" />
       {{ isRetrying ? 'Creating...' : 'Retry Failed' }}
     </Button>
+
+    <!-- Retry Dialog -->
+    <Dialog v-model:open="showRetryDialog">
+      <DialogContent class="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>Retry Failed Requests</DialogTitle>
+          <DialogDescription>
+            Create a new batch to retry {{ batch.errorCount }} failed request(s). You can optionally use a different model.
+          </DialogDescription>
+        </DialogHeader>
+        <div class="py-4 space-y-4">
+          <div class="space-y-2">
+            <Label for="retry-model">Model (optional)</Label>
+            <Input
+              id="retry-model"
+              v-model="retryModel"
+              placeholder="Leave empty to use same model"
+            />
+            <p class="text-xs text-muted-foreground">
+              Current model: {{ batch.model }}
+            </p>
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" @click="showRetryDialog = false">
+            Cancel
+          </Button>
+          <Button @click="handleRetryConfirm" :disabled="isRetrying">
+            {{ isRetrying ? 'Creating...' : 'Create Retry Batch' }}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
     
     <Button
       variant="destructive"
@@ -58,6 +91,16 @@
 import { ref, computed } from 'vue'
 import { useBatches, useToast } from '@/composables'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
 import Icon from '../Icon.vue'
 import type { Batch } from '@/types/api'
 
@@ -78,6 +121,8 @@ const isRefreshing = ref(false)
 const isProcessing = ref(false)
 const isRetrying = ref(false)
 const isDeleting = ref(false)
+const showRetryDialog = ref(false)
+const retryModel = ref('')
 
 const canRefresh = computed(() => {
   return props.batch.status === 'submitted' || props.batch.status === 'processing'
@@ -123,13 +168,16 @@ async function handleProcess() {
   }
 }
 
-async function handleRetry() {
-  if (!confirm('Create a new batch to retry failed requests?')) return
-  
+async function handleRetryConfirm() {
   isRetrying.value = true
   try {
-    const result = await retryBatch(props.batch.senderId, props.batch.batchId, {})
+    const result = await retryBatch(props.batch.senderId, props.batch.batchId, {
+      errorFileName: props.batch.errorFileName,
+      model: retryModel.value || undefined,
+    })
     if (result) {
+      showRetryDialog.value = false
+      retryModel.value = ''
       emit('refresh')
     }
   } finally {

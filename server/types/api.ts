@@ -64,6 +64,7 @@ export interface Batch {
   estimatedCompletionTime?: string
   hasOutput: boolean
   hasErrors: boolean
+  errorFileName?: string
   outputProcessed: boolean
 }
 
