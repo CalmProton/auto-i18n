@@ -239,12 +239,14 @@ changesRoutes.post('/:sessionId/process', async ({ params, set }) => {
     }
 
     // Find delta files recursively (they're organized by locale/type)
-    const { getChangeDeltasPath } = await import('../utils/changeStorage')
+    const { getChangeDeltasPath, getChangeOriginalFilesPath } = await import('../utils/changeStorage')
     const { readdirSync, existsSync, statSync } = await import('fs')
     const { join: pathJoin } = await import('path')
     
     const deltasPath = getChangeDeltasPath(sessionId)
+    const originalFilesPath = getChangeOriginalFilesPath(sessionId)
     let deltaFiles: string[] = []
+    let contentFiles: string[] = []
     
     // Recursively find all .delta.json files
     const findDeltaFiles = (dir: string): void => {
@@ -280,9 +282,44 @@ changesRoutes.post('/:sessionId/process', async ({ params, set }) => {
       }
     }
     
+    // Recursively find all content files (markdown)
+    const findContentFiles = (dir: string): void => {
+      if (!existsSync(dir)) {
+        log.warn('Content directory does not exist', { dir })
+        return
+      }
+      
+      try {
+        const entries = readdirSync(dir)
+        log.info('Scanning content directory', { dir, entryCount: entries.length, entries })
+        
+        for (const entry of entries) {
+          const fullPath = pathJoin(dir, entry)
+          let stat
+          try {
+            stat = statSync(fullPath)
+          } catch (err) {
+            log.warn('Failed to stat file', { fullPath, error: err })
+            continue
+          }
+          
+          if (stat.isDirectory()) {
+            log.info('Recursing into content subdirectory', { fullPath })
+            findContentFiles(fullPath)
+          } else if (entry.endsWith('.md') || entry.endsWith('.mdx')) {
+            log.info('Found content file', { fullPath })
+            contentFiles.push(fullPath)
+          }
+        }
+      } catch (error) {
+        log.error('Error scanning content directory', { dir, error })
+      }
+    }
+    
     findDeltaFiles(deltasPath)
+    findContentFiles(originalFilesPath)
 
-    if (deltaFiles.length === 0) {
+    if (deltaFiles.length === 0 && contentFiles.length === 0) {
       set.status = 400
       const errorResponse: ErrorResponse = { 
         error: 'No translatable changes found. All changes were either deletions or had no content differences.' 
@@ -290,9 +327,15 @@ changesRoutes.post('/:sessionId/process', async ({ params, set }) => {
       return errorResponse
     }
 
-    log.info('Found delta files for batch creation', { sessionId, count: deltaFiles.length, files: deltaFiles })
+    log.info('Found files for batch creation', { 
+      sessionId, 
+      deltaCount: deltaFiles.length, 
+      contentCount: contentFiles.length,
+      deltaFiles, 
+      contentFiles 
+    })
 
-    // Create batch from delta files
+    // Create batch from delta and content files
     const { createDeltaBatch } = await import('../services/translation/deltaBatchService')
     
     try {
@@ -300,7 +343,8 @@ changesRoutes.post('/:sessionId/process', async ({ params, set }) => {
         sessionId,
         sourceLocale: metadata.sourceLocale,
         targetLocales: metadata.targetLocales,
-        deltaFiles
+        deltaFiles,
+        contentFiles
       })
 
       // Update change session status

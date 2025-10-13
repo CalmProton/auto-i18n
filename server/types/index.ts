@@ -206,6 +206,15 @@ export interface JsonDelta {
   deleted: string[]
 }
 
+export interface MarkdownDelta {
+  changes: Array<{
+    lineNumber: number
+    oldLine: string
+    newLine: string
+    type: 'added' | 'modified' | 'deleted'
+  }>
+}
+
 export interface ChangeSessionMetadata {
   sessionId: string
   status: ChangeStatus

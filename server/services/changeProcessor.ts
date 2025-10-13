@@ -5,6 +5,7 @@ import type {
   ChangeSessionMetadata, 
   FileChange,
   JsonDelta,
+  MarkdownDelta,
   TranslationFileType
 } from '../types'
 import { createScopedLogger } from '../utils/logger'
@@ -14,7 +15,7 @@ import {
   saveDelta,
   getChangeOriginalFilesPath 
 } from '../utils/changeStorage'
-import { extractJsonDelta, parseJsonSafe, isDeltaEmpty } from '../utils/deltaExtractor'
+import { extractJsonDelta, extractMarkdownDelta, parseJsonSafe, isDeltaEmpty } from '../utils/deltaExtractor'
 import { GitHubClient } from './github/client'
 
 const log = createScopedLogger('services:changeProcessor')
@@ -179,6 +180,43 @@ export async function processChanges(
             })
           }
         }
+
+        // Extract delta for markdown files
+        if (change.type === 'content') {
+          const delta = await extractMarkdownDeltaFromFile(
+            request.sessionId,
+            change,
+            content,
+            request.repository,
+            request.sourceLocale
+          )
+
+          if (delta && delta.changes.length > 0) {
+            processedChange.hasDelta = true
+            const deltaPath = await saveDelta(
+              request.sessionId,
+              request.sourceLocale,
+              change.type,
+              relativePath.replace(/\.(md|mdx)$/, '.delta.json'),
+              delta
+            )
+            processedChange.deltaPath = deltaPath
+            
+            log.info('Extracted markdown delta', {
+              sessionId: request.sessionId,
+              path: change.path,
+              changes: delta.changes.length,
+              added: delta.changes.filter((c: any) => c.type === 'added').length,
+              modified: delta.changes.filter((c: any) => c.type === 'modified').length,
+              deleted: delta.changes.filter((c: any) => c.type === 'deleted').length
+            })
+          } else {
+            log.info('No markdown delta detected', {
+              sessionId: request.sessionId,
+              path: change.path
+            })
+          }
+        }
       }
 
       processedChanges.push(processedChange)
@@ -292,6 +330,73 @@ async function extractDeltaFromFile(
     }
   } catch (error) {
     log.error('Failed to extract delta', { 
+      sessionId, 
+      path: change.path, 
+      error 
+    })
+    return null
+  }
+}
+
+/**
+ * Extract markdown delta by comparing with previous version from GitHub
+ */
+async function extractMarkdownDeltaFromFile(
+  sessionId: string,
+  change: FileChange,
+  newContent: string,
+  repository: ChangesUploadRequest['repository'],
+  sourceLocale: string
+): Promise<MarkdownDelta | null> {
+  try {
+    // For added files, all lines are new
+    if (change.changeType === 'added') {
+      const lines = newContent.split('\n')
+      return {
+        changes: lines.map((line, index) => ({
+          lineNumber: index + 1,
+          oldLine: '',
+          newLine: line,
+          type: 'added' as const
+        }))
+      }
+    }
+
+    // For modified files, fetch old version from GitHub
+    const client = new GitHubClient()
+
+    try {
+      const oldContent = await client.getFileContent(
+        repository.owner,
+        repository.name,
+        change.path,
+        repository.baseCommitSha
+      )
+
+      // Extract delta
+      const delta = extractMarkdownDelta(oldContent, newContent)
+      
+      return delta
+    } catch (error) {
+      log.warn('Failed to fetch old markdown version from GitHub, treating as new', {
+        sessionId,
+        path: change.path,
+        error
+      })
+      
+      // Treat as all new
+      const lines = newContent.split('\n')
+      return {
+        changes: lines.map((line, index) => ({
+          lineNumber: index + 1,
+          oldLine: '',
+          newLine: line,
+          type: 'added' as const
+        }))
+      }
+    }
+  } catch (error) {
+    log.error('Failed to extract markdown delta', { 
       sessionId, 
       path: change.path, 
       error 

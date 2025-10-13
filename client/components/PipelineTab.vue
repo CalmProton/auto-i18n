@@ -77,7 +77,7 @@ const adaptUploadToChangeSession = (upload: Upload): ChangeSession => {
 const adaptedSessions = computed(() => filteredUploads.value.map(adaptUploadToChangeSession))
 
 // Auto-refresh every 10 seconds
-const { pause, resume } = useRefreshInterval(fetchUploads, { interval: 10000 })
+const { pause, resume } = useRefreshInterval(fetchUploads, { interval: 30000 })
 
 onMounted(() => {
   fetchUploads()

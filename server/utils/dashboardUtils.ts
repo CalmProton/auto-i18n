@@ -142,24 +142,37 @@ export function getUploadInfo(senderId: string): Upload | null {
       // For changes, files are in changes/original/
       const changesOriginalDir = join(senderDir, 'changes', 'original')
       
-      // Count files directly in the original directory
+      // Count files recursively and classify properly
       fileCount = { content: 0, global: 0, page: 0, total: 0 }
-      if (existsSync(changesOriginalDir)) {
-        const files = readdirSync(changesOriginalDir, { withFileTypes: true })
+      
+      const countFilesRecursively = (dir: string, isRoot: boolean = true): void => {
+        if (!existsSync(dir)) return
+        
+        const files = readdirSync(dir, { withFileTypes: true })
         for (const file of files) {
-          if (file.isFile()) {
-            // Determine file type based on name/extension
+          const fullPath = join(dir, file.name)
+          
+          if (file.isDirectory()) {
+            // Recurse into subdirectories
+            countFilesRecursively(fullPath, false)
+          } else if (file.isFile()) {
+            // Classify file type
             if (file.name.endsWith('.json')) {
-              fileCount.global++
+              // JSON files at root are global, in subdirectories are page
+              if (isRoot) {
+                fileCount.global++
+              } else {
+                fileCount.page++
+              }
             } else if (file.name.endsWith('.md') || file.name.endsWith('.mdx')) {
               fileCount.content++
-            } else {
-              fileCount.page++
             }
             fileCount.total++
           }
         }
       }
+      
+      countFilesRecursively(changesOriginalDir)
     } else {
       // For regular uploads, files are in uploads/{locale}/
       const uploadsDir = join(senderDir, 'uploads')

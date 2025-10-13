@@ -261,7 +261,7 @@ export async function readChangeFile(
 export async function saveDelta(
   sessionId: string,
   locale: string,
-  type: 'global' | 'page',
+  type: 'global' | 'page' | 'content',
   relativePath: string,
   delta: any
 ): Promise<string> {
@@ -283,7 +283,7 @@ export async function saveDelta(
 export async function readDelta(
   sessionId: string,
   locale: string,
-  type: 'global' | 'page',
+  type: 'global' | 'page' | 'content',
   relativePath: string
 ): Promise<any | null> {
   const basePath = getChangeDeltaPath(sessionId, locale)

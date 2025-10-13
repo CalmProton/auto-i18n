@@ -79,6 +79,70 @@ export function parseJsonSafe(content: string): Record<string, any> | null {
 }
 
 /**
+ * Extract line-by-line delta for markdown files
+ * Returns changed lines with their line numbers
+ */
+export interface MarkdownDelta {
+  changes: Array<{
+    lineNumber: number
+    oldLine: string
+    newLine: string
+    type: 'added' | 'modified' | 'deleted'
+  }>
+}
+
+export function extractMarkdownDelta(
+  oldContent: string,
+  newContent: string
+): MarkdownDelta {
+  const oldLines = oldContent.split('\n')
+  const newLines = newContent.split('\n')
+  const changes: MarkdownDelta['changes'] = []
+
+  const maxLength = Math.max(oldLines.length, newLines.length)
+
+  for (let i = 0; i < maxLength; i++) {
+    const oldLine = oldLines[i] ?? ''
+    const newLine = newLines[i] ?? ''
+
+    if (i >= oldLines.length) {
+      // Line was added
+      changes.push({
+        lineNumber: i + 1,
+        oldLine: '',
+        newLine,
+        type: 'added'
+      })
+    } else if (i >= newLines.length) {
+      // Line was deleted
+      changes.push({
+        lineNumber: i + 1,
+        oldLine,
+        newLine: '',
+        type: 'deleted'
+      })
+    } else if (oldLine !== newLine) {
+      // Line was modified
+      changes.push({
+        lineNumber: i + 1,
+        oldLine,
+        newLine,
+        type: 'modified'
+      })
+    }
+  }
+
+  log.debug('Extracted markdown delta', {
+    totalChanges: changes.length,
+    added: changes.filter(c => c.type === 'added').length,
+    modified: changes.filter(c => c.type === 'modified').length,
+    deleted: changes.filter(c => c.type === 'deleted').length
+  })
+
+  return { changes }
+}
+
+/**
  * Merge a delta back into a full JSON object
  * Used after translation to merge translated deltas into existing translations
  */

@@ -22,7 +22,7 @@ import {
 } from '../utils/dashboardUtils'
 import { SUPPORTED_LOCALES } from '../config/locales'
 import type { Upload, Batch, TranslationSession, GitHubSession } from '../types/api'
-import { join } from 'node:path'
+import { join, sep } from 'node:path'
 import { existsSync } from 'node:fs'
 
 const log = createScopedLogger('routes:dashboard')
@@ -101,11 +101,24 @@ dashboardRoutes.get('/uploads/:senderId', async ({ params }) => {
       // For changes, files are directly in changes/original/
       const allFiles = listFiles(changesOriginalDir)
       
-      // Categorize files based on extension
+      // Categorize files based on extension and location
+      // JSON files at root level are global, in subdirectories are page
+      const changesOriginalDepth = changesOriginalDir.split(sep).length
+      
       files = {
         content: allFiles.filter(f => f.name.endsWith('.md') || f.name.endsWith('.mdx')),
-        global: allFiles.filter(f => f.name.endsWith('.json')),
-        page: allFiles.filter(f => !f.name.endsWith('.json') && !f.name.endsWith('.md') && !f.name.endsWith('.mdx')),
+        global: allFiles.filter(f => {
+          if (!f.name.endsWith('.json')) return false
+          // Global files are JSON files directly in the root (not in subdirectories)
+          const fileDepth = f.path.split(sep).length
+          return fileDepth === changesOriginalDepth + 1
+        }),
+        page: allFiles.filter(f => {
+          if (!f.name.endsWith('.json')) return false
+          // Page files are JSON files in subdirectories
+          const fileDepth = f.path.split(sep).length
+          return fileDepth > changesOriginalDepth + 1
+        }),
       }
     } else {
       // For regular uploads, files are organized by type in uploads/{locale}/
