@@ -4,7 +4,7 @@ import type { ChangeSession } from '../../types/api'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../ui/card'
 import { Badge } from '../ui/badge'
 import { Button } from '../ui/button'
-import { GitBranch, GitCommit, Play, CheckCircle, Trash2, ExternalLink, AlertCircle } from 'lucide-vue-next'
+import { GitBranch, GitCommit, Play, CheckCircle, Trash2, ExternalLink, AlertCircle, RefreshCw } from 'lucide-vue-next'
 import ChangesStepper from './ChangesStepper.vue'
 import { useToast } from '../../composables'
 
@@ -19,6 +19,7 @@ const emit = defineEmits<{
   delete: [sessionId: string]
   retryBatchOutput: [sessionId: string]
   retryPr: [sessionId: string]
+  resetSession: [sessionId: string, full: boolean]
   refresh: []
 }>()
 
@@ -131,6 +132,29 @@ const handleRetryPR = async () => {
     retrying.value = null
   }
 }
+
+const handleResetSession = async (full = false) => {
+  const confirmMessage = full
+    ? 'Full reset will delete all translations and start from scratch. Are you sure?'
+    : 'Reset PR status only? This will allow you to create a new PR with existing translations.'
+  
+  if (!confirm(confirmMessage)) {
+    return
+  }
+  
+  retrying.value = full ? 'full-reset' : 'reset'
+  try {
+    emit('resetSession', props.session.sessionId, full)
+  } catch (error) {
+    showToast({
+      title: 'Error',
+      description: error instanceof Error ? error.message : 'Failed to reset session',
+      variant: 'destructive'
+    })
+  } finally {
+    retrying.value = null
+  }
+}
 </script>
 
 <template>
@@ -172,6 +196,16 @@ const handleRetryPR = async () => {
             <Play class="h-4 w-4 mr-1" />
             Process
           </Button>
+
+          <Button
+            v-if="session.status === 'processing' && session.steps.submitted?.completed && !session.steps.completed?.completed"
+            size="sm"
+            @click="handleRetryBatchOutput"
+            :disabled="retrying === 'batch-output'"
+          >
+            <Play class="h-4 w-4 mr-1" />
+            Process Batch Output
+          </Button>
           
           <Button
             v-if="session.status === 'completed' && session.automationMode === 'manual' && !session.steps.prCreated.completed"
@@ -193,6 +227,28 @@ const handleRetryPR = async () => {
           >
             <ExternalLink class="h-4 w-4 mr-1" />
             View PR
+          </Button>
+
+          <Button
+            v-if="session.steps.prCreated?.completed && session.hasErrors"
+            size="sm"
+            variant="outline"
+            @click="handleResetSession(false)"
+            :disabled="retrying === 'reset' || retrying === 'full-reset'"
+          >
+            <RefreshCw class="h-4 w-4 mr-1" />
+            Reset PR
+          </Button>
+
+          <Button
+            v-if="session.hasErrors"
+            size="sm"
+            variant="destructive"
+            @click="handleResetSession(true)"
+            :disabled="retrying === 'reset' || retrying === 'full-reset'"
+          >
+            <RefreshCw class="h-4 w-4 mr-1" />
+            Full Reset
           </Button>
 
           <Button
@@ -244,7 +300,7 @@ const handleRetryPR = async () => {
           </div>
           <div class="flex items-center gap-2">
             <Button
-              v-if="session.status === 'completed' && session.hasErrors"
+              v-if="session.hasErrors"
               size="sm"
               variant="outline"
               @click="handleRetryBatchOutput"
@@ -254,7 +310,7 @@ const handleRetryPR = async () => {
               Retry Output
             </Button>
             <Button
-              v-if="session.status === 'completed' && !session.steps.prCreated.completed"
+              v-if="session.status === 'completed' && !session.steps.prCreated.completed && session.hasErrors"
               size="sm"
               variant="outline"
               @click="handleRetryPR"

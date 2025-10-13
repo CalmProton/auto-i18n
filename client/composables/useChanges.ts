@@ -125,6 +125,22 @@ export function useChanges() {
     }
   }
 
+  // Reset session
+  // full=false: Only reset PR step (keep translations)
+  // full=true: Reset all steps (delete translations, start from scratch)
+  const resetSession = async (sessionId: string, full = false) => {
+    try {
+      const queryParam = full ? '?full=true' : ''
+      await api.post(`/translate/changes/${sessionId}/reset${queryParam}`, {})
+      await fetchChange(sessionId)
+      await fetchChanges()
+    } catch (err) {
+      error.value = err instanceof Error ? err.message : 'Failed to reset session'
+      console.error('Error resetting session:', err)
+      throw err
+    }
+  }
+
   // Get change status
   const getChangeStatus = async (sessionId: string) => {
     try {
@@ -188,6 +204,7 @@ export function useChanges() {
     deleteChange,
     retryBatchOutput,
     retryPR,
+    resetSession,
     getChangeStatus
   }
 }

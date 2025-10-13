@@ -302,3 +302,24 @@ export async function readDelta(
     return null
   }
 }
+
+/**
+ * Delete all translations (deltas) for a change session
+ */
+export async function deleteTranslations(sessionId: string): Promise<boolean> {
+  const deltasPath = getChangeDeltasPath(sessionId)
+  
+  if (!existsSync(deltasPath)) {
+    log.debug('No translations to delete', { sessionId })
+    return true
+  }
+
+  try {
+    await rm(deltasPath, { recursive: true, force: true })
+    log.info('Deleted translations for change session', { sessionId, deltasPath })
+    return true
+  } catch (error) {
+    log.error('Failed to delete translations', { sessionId, deltasPath, error })
+    return false
+  }
+}

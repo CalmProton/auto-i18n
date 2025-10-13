@@ -19,7 +19,8 @@ const {
   finalizeChange,
   deleteChange,
   retryBatchOutput,
-  retryPR
+  retryPR,
+  resetSession
 } = useChanges()
 
 // Auto-refresh every 10 seconds
@@ -75,6 +76,15 @@ const handleRetryPR = async (sessionId: string) => {
   pause()
   try {
     await retryPR(sessionId)
+  } finally {
+    resume()
+  }
+}
+
+const handleResetSession = async (sessionId: string, full = false) => {
+  pause()
+  try {
+    await resetSession(sessionId, full)
   } finally {
     resume()
   }
@@ -180,6 +190,7 @@ const handleRetryPR = async (sessionId: string) => {
         @delete="handleDelete"
         @retry-batch-output="handleRetryBatchOutput"
         @retry-pr="handleRetryPR"
+        @reset-session="handleResetSession"
         @refresh="fetchChanges"
       />
     </div>

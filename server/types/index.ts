@@ -197,7 +197,7 @@ export interface ChangeSessionSteps {
   submitted: StepStatus & { openAiBatchId?: string }
   processing: StepStatus & { progress?: number }
   completed: StepStatus & { translationCount?: number }
-  prCreated: StepStatus & { pullRequestNumber?: number; pullRequestUrl?: string }
+  prCreated: StepStatus & { pullRequestNumber?: number; pullRequestUrl?: string; branchName?: string }
 }
 
 export interface JsonDelta {

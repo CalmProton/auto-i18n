@@ -195,8 +195,20 @@ export async function createChangePR(options: CreateChangePROptions): Promise<Cr
   const { repository } = metadata
 
   // Prepare branch name and PR details
-  const timestamp = new Date().toISOString().split('T')[0].replace(/-/g, '')
-  const branchName = `auto-i18n/changes-${sessionId.substring(0, 15)}-${timestamp}`
+  // If PR already exists, reuse that branch. Otherwise create new one with timestamp
+  let branchName: string
+  
+  if (metadata.steps.prCreated?.completed && metadata.steps.prCreated?.branchName) {
+    // Reuse existing branch to update the same PR
+    branchName = metadata.steps.prCreated.branchName
+    log.info('Reusing existing branch', { sessionId, branchName })
+  } else {
+    // Create new branch with unique timestamp
+    const timestamp = new Date().toISOString().split('T')[0].replace(/-/g, '')
+    const timeComponent = Date.now().toString().slice(-6) // Last 6 digits for uniqueness
+    branchName = `auto-i18n/changes-${sessionId.substring(0, 15)}-${timestamp}-${timeComponent}`
+    log.info('Creating new branch', { sessionId, branchName })
+  }
   
   const changeCount = metadata.changes.length
   const addedCount = metadata.changes.filter(c => c.changeType === 'added').length
@@ -304,8 +316,9 @@ ${metadata.targetLocales.map(locale => `- ${locale}`).join('\n')}
 
   // Determine target paths based on the original file paths from metadata
   const getTargetPath = (locale: string, type: string, fileName: string): string => {
-    // Find the original file path from metadata
-    const originalChange = metadata.changes?.find(c => c.type === type && c.relativePath === fileName)
+    // fileName is the target locale filename (e.g., ar.json)
+    // We need to find the source file by matching on type only (for global files there's usually just one)
+    const originalChange = metadata.changes?.find(c => c.type === type)
     
     if (originalChange?.path) {
       // Use the original path structure, but replace the source locale filename with target locale
@@ -317,9 +330,8 @@ ${metadata.targetLocales.map(locale => `- ${locale}`).join('\n')}
       // For global files: en.json -> ru.json
       // For content/page files: keep the structure but in the target locale folder
       if (type === 'global') {
-        // Replace en.json with {locale}.json
-        const targetFileName = sourceFileName.replace(/^[a-z]{2}\.json$/, `${locale}.json`)
-        pathParts[pathParts.length - 1] = targetFileName
+        // Replace the last part (filename) with target locale filename
+        pathParts[pathParts.length - 1] = fileName
         return pathParts.join('/')
       } else {
         // For content/page files, replace the locale folder
@@ -435,28 +447,48 @@ ${metadata.targetLocales.map(locale => `- ${locale}`).join('\n')}
 
   log.info('Created commit', { sessionId, commitSha: commit.sha })
 
-  // Step 4: Create pull request
-  const prTitle = issueTitle
-  const prBody = `${issueBody}\n\n---\n\n**Issue**: #${issue.number}`
+  // Step 4: Create or update pull request
+  let pr: { number: number; html_url: string }
+  
+  // Check if PR already exists (from previous attempt)
+  if (metadata.steps.prCreated?.completed && metadata.steps.prCreated?.pullRequestNumber) {
+    // PR already exists, just update it with the new commit (already done via commit above)
+    pr = {
+      number: metadata.steps.prCreated.pullRequestNumber,
+      html_url: metadata.steps.prCreated.pullRequestUrl || ''
+    }
+    
+    log.info('✅ Updated existing pull request with new commit', {
+      sessionId,
+      pullRequestNumber: pr.number,
+      pullRequestUrl: pr.html_url,
+      commitSha: commit.sha,
+      filesChanged: translationFiles.length
+    })
+  } else {
+    // Create new pull request
+    const prTitle = issueTitle
+    const prBody = `${issueBody}\n\n---\n\n**Issue**: #${issue.number}`
 
-  log.info('Creating pull request', { sessionId, branchName, baseBranch: repository.baseBranch })
+    log.info('Creating pull request', { sessionId, branchName, baseBranch: repository.baseBranch })
 
-  const pr = await client.createPullRequest({
-    owner: repository.owner,
-    repo: repository.name,
-    title: prTitle,
-    body: prBody,
-    head: branchName,
-    base: repository.baseBranch
-  })
+    pr = await client.createPullRequest({
+      owner: repository.owner,
+      repo: repository.name,
+      title: prTitle,
+      body: prBody,
+      head: branchName,
+      base: repository.baseBranch
+    })
 
-  log.info('✅ Created pull request for change session', {
-    sessionId,
-    pullRequestNumber: pr.number,
-    pullRequestUrl: pr.html_url,
-    filesChanged: translationFiles.length,
-    locales: Object.keys(filesByLocale)
-  })
+    log.info('✅ Created pull request for change session', {
+      sessionId,
+      pullRequestNumber: pr.number,
+      pullRequestUrl: pr.html_url,
+      filesChanged: translationFiles.length,
+      locales: Object.keys(filesByLocale)
+    })
+  }
 
   return {
     issueNumber: issue.number,

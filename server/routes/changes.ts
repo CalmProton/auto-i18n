@@ -471,6 +471,17 @@ changesRoutes.post('/:sessionId/retry-batch-output', async ({ params, set }) => 
       errorCount: result.errorCount
     })
 
+    // Update session status to completed
+    await updateChangeSessionStatus(sessionId, 'completed', {
+      completed: {
+        completed: true,
+        timestamp: new Date().toISOString(),
+        translationCount: result.processedCount
+      }
+    })
+
+    log.info('Change session marked as completed', { sessionId, translationCount: result.processedCount })
+
     // Trigger PR creation if output processing succeeded
     if (result.processedCount > 0) {
       const { createChangePR } = await import('../services/github/changeWorkflow')
@@ -484,7 +495,8 @@ changesRoutes.post('/:sessionId/retry-batch-output', async ({ params, set }) => 
             completed: true,
             timestamp: new Date().toISOString(),
             pullRequestNumber: prResult.pullRequestNumber,
-            pullRequestUrl: prResult.pullRequestUrl
+            pullRequestUrl: prResult.pullRequestUrl,
+            branchName: prResult.branchName
           }
         })
 
@@ -545,7 +557,8 @@ changesRoutes.post('/:sessionId/retry-pr', async ({ params, set }) => {
         completed: true,
         timestamp: new Date().toISOString(),
         pullRequestNumber: result.pullRequestNumber,
-        pullRequestUrl: result.pullRequestUrl
+        pullRequestUrl: result.pullRequestUrl,
+        branchName: result.branchName
       }
     })
 
@@ -568,6 +581,171 @@ changesRoutes.post('/:sessionId/retry-pr', async ({ params, set }) => {
     set.status = 500
     const errorResponse: ErrorResponse = { 
       error: error instanceof Error ? error.message : 'Failed to retry PR creation' 
+    }
+    return errorResponse
+  }
+})
+
+/**
+ * POST /translate/changes/:sessionId/reset
+ * Reset session to allow reprocessing or creating a new PR
+ * Query params:
+ * - full=true: Reset all steps (batch, translations, PR) to start from scratch
+ * - full=false (default): Only reset PR step to retry PR creation with existing translations
+ */
+changesRoutes.post('/:sessionId/reset', async ({ params, query, set }) => {
+  const { sessionId } = params
+  const fullReset = query.full === 'true'
+
+  try {
+    log.info('Resetting change session', { sessionId, fullReset })
+
+    const metadata = await loadChangeSession(sessionId)
+    if (!metadata) {
+      set.status = 404
+      const errorResponse: ErrorResponse = { 
+        error: `Change session ${sessionId} not found` 
+      }
+      return errorResponse
+    }
+
+    if (fullReset) {
+      // Full reset - clear translations to start from scratch
+      // But preserve batch info if batch is already completed
+      log.info('Performing full reset - clearing translation steps', { sessionId })
+      
+      // Check if we have a completed batch by scanning the batches directory
+      let hasCompletedBatch = false
+      let batchId: string | undefined
+      let openAiBatchId: string | undefined
+      
+      const { existsSync, readdirSync, readFileSync } = await import('node:fs')
+      const { join } = await import('node:path')
+      const { tempRoot } = await import('../utils/fileStorage')
+      const batchesPath = join(tempRoot, sessionId, 'batches')
+      
+      if (existsSync(batchesPath)) {
+        try {
+          const batchDirs = readdirSync(batchesPath, { withFileTypes: true })
+            .filter(dirent => dirent.isDirectory())
+            .map(dirent => dirent.name)
+          
+          for (const dir of batchDirs) {
+            const manifestPath = join(batchesPath, dir, 'manifest.json')
+            if (existsSync(manifestPath)) {
+              const manifestContent = readFileSync(manifestPath, 'utf8')
+              const manifest = JSON.parse(manifestContent)
+              
+              if (manifest.status === 'completed') {
+                hasCompletedBatch = true
+                batchId = manifest.batchId
+                openAiBatchId = manifest.openai?.batchId
+                log.info('Found existing completed batch', { 
+                  sessionId, 
+                  batchId,
+                  openAiBatchId,
+                  batchStatus: manifest.status
+                })
+                break // Use the first completed batch found
+              }
+            }
+          }
+        } catch (error) {
+          log.warn('Failed to scan for completed batches', { sessionId, error })
+        }
+      }
+      
+      if (hasCompletedBatch && batchId) {
+        // Keep batch steps, only reset translation processing
+        log.info('Preserving completed batch, resetting only translation steps', { 
+          sessionId, 
+          batchId,
+          openAiBatchId 
+        })
+        
+        // Restore batch metadata
+        metadata.steps.batchCreated = {
+          completed: true,
+          batchId,
+          timestamp: new Date().toISOString()
+        }
+        metadata.steps.submitted = {
+          completed: true,
+          openAiBatchId: openAiBatchId || '',
+          timestamp: new Date().toISOString()
+        }
+        metadata.steps.processing = { completed: false }
+        metadata.steps.completed = { completed: false }
+        metadata.steps.prCreated = { completed: false }
+        metadata.status = 'processing'
+      } else {
+        // No completed batch - reset everything
+        log.info('No completed batch found, resetting all steps', { sessionId })
+        metadata.steps.batchCreated = { completed: false }
+        metadata.steps.submitted = { completed: false }
+        metadata.steps.processing = { completed: false }
+        metadata.steps.completed = { completed: false }
+        metadata.steps.prCreated = { completed: false }
+        metadata.status = 'uploaded'
+      }
+      
+      // Clear all errors
+      metadata.errors = []
+      
+      // Delete translation files
+      const { deleteTranslations } = await import('../utils/changeStorage')
+      await deleteTranslations(sessionId)
+      
+    } else {
+      // PR-only reset - keep translations, just reset PR step
+      log.info('Performing PR reset only', { sessionId })
+      
+      // Reset the prCreated step to allow new PR creation
+      metadata.steps.prCreated = {
+        completed: false
+      }
+      
+      // Update status back to completed
+      metadata.status = 'completed'
+      
+      // Clear PR-related errors
+      metadata.errors = metadata.errors.filter(e => 
+        !e.step.includes('pr') && 
+        !e.step.includes('finalize') &&
+        !e.step.includes('auto-pipeline')
+      )
+    }
+
+    metadata.updatedAt = new Date().toISOString()
+
+    // Save updated metadata
+    const { saveChangeSession } = await import('../utils/changeStorage')
+    await saveChangeSession(metadata)
+
+    let message: string
+    if (fullReset) {
+      if (metadata.status === 'processing') {
+        message = 'Session reset. Existing completed batch preserved. Click "Retry Output" to process translations.'
+      } else {
+        message = 'Session fully reset. Click "Process" to create a new batch and translations.'
+      }
+    } else {
+      message = 'Session reset. You can now retry creating a new PR with existing translations.'
+    }
+    
+    log.info('Change session reset successfully', { sessionId, fullReset, newStatus: metadata.status })
+
+    return {
+      success: true,
+      sessionId,
+      fullReset,
+      message
+    }
+  } catch (error) {
+    log.error('Failed to reset change session', { sessionId, error })
+    set.status = 500
+    const errorResponse: ErrorResponse = { 
+      error: error instanceof Error ? error.message : 'Failed to reset session' 
     }
     return errorResponse
   }

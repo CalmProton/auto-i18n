@@ -112,8 +112,12 @@ function saveTranslationDelta(
   sourceFileName: string,
   translatedDelta: Record<string, any>
 ): void {
+  // Transform source file name to target locale
+  // Example: en.json -> ru.json
+  const targetFileName = sourceFileName.replace(/^[a-z]{2}([-_][A-Z]{2})?\.json$/, `${targetLocale}.json`)
+  
   // Save as a delta file that can be applied to the repo
-  const outputPath = join(TMP_DIR, sessionId, 'translations', targetLocale, 'global', sourceFileName)
+  const outputPath = join(TMP_DIR, sessionId, 'translations', targetLocale, 'global', targetFileName)
   
   // Create directory if needed
   const outputDir = dirname(outputPath)
@@ -123,7 +127,7 @@ function saveTranslationDelta(
   // This will be used to update specific keys in the GitHub repo
   writeFileSync(outputPath, JSON.stringify(translatedDelta, null, 2), 'utf-8')
   
-  log.debug('Saved translation delta', { sessionId, targetLocale, sourceFileName, outputPath, keyCount: Object.keys(translatedDelta).length })
+  log.debug('Saved translation delta', { sessionId, targetLocale, sourceFileName, targetFileName, outputPath, keyCount: Object.keys(translatedDelta).length })
 }
 
 /**
@@ -202,20 +206,24 @@ function processBatchOutputLine(
     // Save translation delta (we don't need to merge - GitHub has the originals)
     saveTranslationDelta(sessionId, parsed.targetLocale, parsed.sourceFileName, translatedDelta)
 
+    // Transform source file name to target file name
+    const targetFileName = parsed.sourceFileName.replace(/^[a-z]{2}([-_][A-Z]{2})?\.json$/, `${parsed.targetLocale}.json`)
+    
     const translatedKeysCount = Object.keys(translatedDelta).length
-    const outputPath = join(TMP_DIR, sessionId, 'translations', parsed.targetLocale, 'global', parsed.sourceFileName)
+    const outputPath = join(TMP_DIR, sessionId, 'translations', parsed.targetLocale, 'global', targetFileName)
 
     log.debug('Processed translation delta', {
       customId: output.custom_id,
       targetLocale: parsed.targetLocale,
       sourceFileName: parsed.sourceFileName,
+      targetFileName,
       keysTranslated: translatedKeysCount
     })
 
     return {
       customId: output.custom_id,
       targetLocale: parsed.targetLocale,
-      fileName: parsed.sourceFileName,
+      fileName: targetFileName,
       filePath: outputPath,
       status: 'success',
       translatedKeysCount
