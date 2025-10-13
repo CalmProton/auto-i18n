@@ -2,6 +2,7 @@ import { Elysia } from 'elysia'
 import { cors } from '@elysiajs/cors'
 import routes from './routes'
 import { authMiddleware, authRoutes } from './middleware/auth'
+import { startBatchPolling } from './services/batchPollingService'
 
 const app = new Elysia()
 
@@ -30,3 +31,6 @@ const PORT = process.env.PORT || 3000
 app.listen(PORT)
 
 console.log(`🦊 Auto-i18n server is running at http://localhost:${PORT}`)
+
+// Start background batch polling service
+startBatchPolling()

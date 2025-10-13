@@ -729,3 +729,212 @@ export async function createRetryBatch(options: CreateRetryBatchOptions): Promis
     inputFilePath
   }
 }
+
+export interface CheckBatchStatusOptions {
+  senderId: string
+  batchId: string
+}
+
+export interface CheckBatchStatusResult {
+  batchId: string
+  openaiBatchId: string
+  status: string
+  requestCounts?: {
+    total: number
+    completed: number
+    failed: number
+  }
+  outputFileId?: string
+  errorFileId?: string
+}
+
+/**
+ * Check the status of a submitted batch with OpenAI
+ */
+export async function checkBatchStatus(options: CheckBatchStatusOptions): Promise<CheckBatchStatusResult> {
+  const { senderId, batchId } = options
+  const { providerConfig } = getOpenAIProviderInfo()
+  const client = createOpenAIClient(providerConfig)
+
+  const manifest = loadManifest(senderId, batchId)
+  
+  if (!manifest.openai?.batchId) {
+    throw new Error(`Batch ${batchId} has not been submitted to OpenAI`)
+  }
+
+  const openaiBatchId = manifest.openai.batchId
+
+  try {
+    const batchStatus = await client.batches.retrieve(openaiBatchId)
+
+    // Update manifest with latest status
+    const updatedManifest: BatchManifest = {
+      ...manifest,
+      openai: {
+        ...manifest.openai,
+        status: batchStatus.status
+      },
+      updatedAt: new Date().toISOString()
+    }
+
+    // If status changed to completed or failed, download output/error files
+    if (batchStatus.status === 'completed' || batchStatus.status === 'failed') {
+      if (batchStatus.output_file_id) {
+        try {
+          const outputContent = await client.files.content(batchStatus.output_file_id)
+          const outputText = await outputContent.text()
+          writeBatchFile(senderId, batchId, `${openaiBatchId}_output.jsonl`, outputText)
+          log.info('Downloaded batch output file', { senderId, batchId, openaiBatchId })
+        } catch (error) {
+          log.error('Failed to download output file', { senderId, batchId, openaiBatchId, error })
+        }
+      }
+
+      if (batchStatus.error_file_id) {
+        try {
+          const errorContent = await client.files.content(batchStatus.error_file_id)
+          const errorText = await errorContent.text()
+          writeBatchFile(senderId, batchId, `${openaiBatchId}_error.jsonl`, errorText)
+          log.info('Downloaded batch error file', { senderId, batchId, openaiBatchId })
+        } catch (error) {
+          log.error('Failed to download error file', { senderId, batchId, openaiBatchId, error })
+        }
+      }
+
+      // Update status in manifest
+      if (batchStatus.status === 'completed') {
+        updatedManifest.status = 'completed'
+      } else if (batchStatus.status === 'failed') {
+        updatedManifest.status = 'failed'
+      }
+
+      // Update change session status if this is a change session batch
+      try {
+        const { loadChangeSession, updateChangeSessionStatus } = await import('../../utils/changeStorage')
+        const changeSession = await loadChangeSession(senderId)
+        
+        if (changeSession && batchStatus.status === 'completed') {
+          // Update status to completed
+          await updateChangeSessionStatus(senderId, 'completed', {
+            completed: {
+              completed: true,
+              timestamp: new Date().toISOString(),
+              translationCount: batchStatus.request_counts?.completed
+            }
+          })
+          log.info('✅ Change session batch completed', { 
+            senderId,
+            completedRequests: batchStatus.request_counts?.completed,
+            batchId 
+          })
+
+          // Auto-pipeline continuation: Process output and create PR
+          if (changeSession.automationMode === 'auto') {
+            log.info('🔄 Auto-pipeline: Starting output processing and PR creation', { senderId, batchId })
+            
+            // Process batch output asynchronously (don't block status check)
+            setImmediate(async () => {
+              try {
+                const { processDeltaBatchOutput } = await import('./deltaBatchOutputProcessor')
+                const { createChangePR } = await import('../github/changeWorkflow')
+                
+                log.info('Processing delta batch output', { senderId, batchId })
+                const processResult = await processDeltaBatchOutput(senderId, batchId)
+                
+                log.info('✅ Delta batch output processed', {
+                  senderId,
+                  batchId,
+                  processedCount: processResult.processedCount,
+                  errorCount: processResult.errorCount,
+                  locales: Object.keys(processResult.translationsByLocale)
+                })
+
+                // Update session with processing complete
+                await updateChangeSessionStatus(senderId, 'completed', {
+                  completed: {
+                    completed: true,
+                    timestamp: new Date().toISOString(),
+                    translationCount: processResult.processedCount
+                  }
+                })
+
+                // Create pull request
+                log.info('Creating pull request', { senderId })
+                const prResult = await createChangePR({ sessionId: senderId })
+                
+                log.info('✅ Pull request created successfully', {
+                  senderId,
+                  pullRequestNumber: prResult.pullRequestNumber,
+                  pullRequestUrl: prResult.pullRequestUrl,
+                  filesChanged: prResult.filesChanged
+                })
+
+                // Update session with PR info
+                await updateChangeSessionStatus(senderId, 'completed', {
+                  prCreated: {
+                    completed: true,
+                    timestamp: new Date().toISOString(),
+                    pullRequestNumber: prResult.pullRequestNumber,
+                    pullRequestUrl: prResult.pullRequestUrl
+                  }
+                })
+
+                log.info('🎉 Auto-pipeline completed successfully', {
+                  senderId,
+                  batchId,
+                  pullRequestNumber: prResult.pullRequestNumber,
+                  pullRequestUrl: prResult.pullRequestUrl
+                })
+              } catch (error) {
+                log.error('❌ Auto-pipeline failed', { senderId, batchId, error })
+                
+                // Update session with error
+                const { addChangeSessionError } = await import('../../utils/changeStorage')
+                await addChangeSessionError(
+                  senderId,
+                  'auto-pipeline',
+                  error instanceof Error ? error.message : 'Unknown error'
+                )
+              }
+            })
+          }
+        } else if (changeSession && batchStatus.status === 'failed') {
+          // Update to failed
+          await updateChangeSessionStatus(senderId, 'failed', {
+            processing: {
+              completed: false,
+              timestamp: new Date().toISOString(),
+              error: 'Batch processing failed'
+            }
+          })
+          log.info('❌ Change session batch failed', { senderId })
+        }
+      } catch (error) {
+        // Don't fail if change session update fails - this might not be a change session
+        log.debug('Could not update change session (might not be a change session)', { senderId, error })
+      }
+    }
+
+    saveManifest(senderId, batchId, updatedManifest)
+
+    log.info('Checked batch status', {
+      senderId,
+      batchId,
+      openaiBatchId,
+      status: batchStatus.status,
+      requestCounts: batchStatus.request_counts
+    })
+
+    return {
+      batchId,
+      openaiBatchId,
+      status: batchStatus.status,
+      requestCounts: batchStatus.request_counts,
+      outputFileId: batchStatus.output_file_id,
+      errorFileId: batchStatus.error_file_id
+    }
+  } catch (error) {
+    log.error('Failed to check batch status', { senderId, batchId, openaiBatchId, error })
+    throw error
+  }
+}

@@ -574,9 +574,13 @@ async function runAutoPipeline(sessionId: string): Promise<void> {
       openAiBatchId: submitResult.openaiBatchId 
     })
 
+    // Trigger immediate status check
+    const { triggerImmediatePoll } = await import('../services/batchPollingService')
+    triggerImmediatePoll()
+
     // Note: Batch will be processed on OpenAI's servers
-    // The user can monitor progress via the dashboard or we can set up polling/webhooks
-    log.info('Auto pipeline: Batch submitted successfully. Monitor status via dashboard.', { sessionId })
+    // Background polling service will check status every 30 seconds
+    log.info('Auto pipeline: Batch submitted successfully. Background polling started.', { sessionId })
 
   } catch (error) {
     log.error('Auto pipeline failed', { sessionId, error })

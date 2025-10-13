@@ -165,6 +165,10 @@ batchRoutes.post('/:batchId/submit', async ({ params, body, set }) => {
 
     const result = await submitBatch({ senderId, batchId, metadata })
 
+    // Trigger immediate status check
+    const { triggerImmediatePoll } = await import('../services/batchPollingService')
+    triggerImmediatePoll()
+
     return {
       message: 'Batch submitted to OpenAI for processing',
       batchId: result.batchId,
