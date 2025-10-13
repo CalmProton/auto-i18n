@@ -39,6 +39,12 @@ CRITICAL RULES:
    - image: keep the URL/path unchanged
    - authorUrl: keep the URL unchanged
    - articleType: keep the technical value unchanged
+   - id: keep the unique identifier unchanged
+   - defaultValue: keep the technical value unchanged
+   - allowCustomValues: keep the technical value unchanged
+   - customValueKeys: keep the technical value unchanged
+   - promptModifier: keep the technical value unchanged
+   - icon, iconColor: keep the technical values unchanged
 
 2. MDC COMPONENT HANDLING:
    - MDC components use :: syntax (e.g., ::blog-table-of-contents)
