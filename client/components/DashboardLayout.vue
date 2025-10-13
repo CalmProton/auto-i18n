@@ -47,6 +47,10 @@
     <div class="container mx-auto px-6">
       <Tabs v-model="activeTab" class="w-full">
         <TabsList class="grid w-full grid-cols-5">
+          <TabsTrigger value="pipeline" class="flex items-center gap-2">
+            <Workflow class="h-4 w-4" />
+            <span>Pipeline</span>
+          </TabsTrigger>
           <TabsTrigger value="uploads" class="flex items-center gap-2">
             <Upload class="h-4 w-4" />
             <span>Uploads</span>
@@ -55,17 +59,13 @@
             <Timer class="h-4 w-4" />
             <span>Batches</span>
           </TabsTrigger>
-          <TabsTrigger value="changes" class="flex items-center gap-2">
-            <GitBranch class="h-4 w-4" />
-            <span>Changes</span>
-          </TabsTrigger>
           <TabsTrigger value="translations" class="flex items-center gap-2">
             <Languages class="h-4 w-4" />
             <span>Translations</span>
           </TabsTrigger>
-          <TabsTrigger value="github" class="flex items-center gap-2">
-            <Github class="h-4 w-4" />
-            <span>GitHub</span>
+          <TabsTrigger value="git" class="flex items-center gap-2">
+            <GitBranch class="h-4 w-4" />
+            <span>Git</span>
           </TabsTrigger>
         </TabsList>
       </Tabs>
@@ -89,26 +89,26 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, watch } from 'vue'
 import { useAuth, useKeyboardShortcuts } from '@/composables'
-import { Languages, Upload, Timer, Github, Keyboard, LogOut, GitBranch } from 'lucide-vue-next'
+import { Languages, Upload, Timer, GitBranch, Keyboard, LogOut, Workflow } from 'lucide-vue-next'
 import { Button } from '@/components/ui/button'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { Kbd } from '@/components/ui/kbd'
 import StatsOverview from './StatsOverview.vue'
+import PipelineTab from './PipelineTab.vue'
 import UploadsTab from './UploadsTab.vue'
 import BatchesTab from './BatchesTab.vue'
 import TranslationsTab from './TranslationsTab.vue'
 import GitHubTab from './GitHubTab.vue'
-import ChangesTab from './ChangesTab.vue'
 import ToastContainer from './ToastContainer.vue'
 import KeyboardShortcutsHelp from './KeyboardShortcutsHelp.vue'
 
 const { isAuthenticated, logout } = useAuth()
-const activeTab = ref('uploads')
+const activeTab = ref('pipeline')
 const helpModal = ref<InstanceType<typeof KeyboardShortcutsHelp> | null>(null)
 
 // Valid tab names
-const validTabs = ['uploads', 'batches', 'changes', 'translations', 'github'] as const
+const validTabs = ['pipeline', 'uploads', 'batches', 'translations', 'git'] as const
 type TabName = typeof validTabs[number]
 
 // Initialize tab from URL on mount
@@ -134,7 +134,7 @@ window.addEventListener('popstate', () => {
   if (tabFromUrl && validTabs.includes(tabFromUrl as TabName)) {
     activeTab.value = tabFromUrl
   } else {
-    activeTab.value = 'uploads'
+    activeTab.value = 'pipeline'
   }
 })
 
@@ -147,20 +147,20 @@ useKeyboardShortcuts([
   {
     key: '1',
     alt: true,
-    description: 'Go to Uploads tab',
-    handler: () => activeTab.value = 'uploads'
+    description: 'Go to Pipeline tab',
+    handler: () => activeTab.value = 'pipeline'
   },
   {
     key: '2',
     alt: true,
-    description: 'Go to Batches tab',
-    handler: () => activeTab.value = 'batches'
+    description: 'Go to Uploads tab',
+    handler: () => activeTab.value = 'uploads'
   },
   {
     key: '3',
     alt: true,
-    description: 'Go to Changes tab',
-    handler: () => activeTab.value = 'changes'
+    description: 'Go to Batches tab',
+    handler: () => activeTab.value = 'batches'
   },
   {
     key: '4',
@@ -171,25 +171,25 @@ useKeyboardShortcuts([
   {
     key: '5',
     alt: true,
-    description: 'Go to GitHub tab',
-    handler: () => activeTab.value = 'github'
+    description: 'Go to Git tab',
+    handler: () => activeTab.value = 'git'
   }
 ])
 
 const currentTabComponent = computed(() => {
   switch (activeTab.value) {
+    case 'pipeline':
+      return PipelineTab
     case 'uploads':
       return UploadsTab
     case 'batches':
       return BatchesTab
-    case 'changes':
-      return ChangesTab
     case 'translations':
       return TranslationsTab
-    case 'github':
+    case 'git':
       return GitHubTab
     default:
-      return UploadsTab
+      return PipelineTab
   }
 })
 

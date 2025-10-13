@@ -1,24 +1,26 @@
 import { ref, computed } from 'vue'
-import type { ChangeSession } from '../types/api'
+import type { Upload, PipelineStatus, SessionType } from '../types/api'
 import { api } from '../lib/api-client'
 
-export interface ChangeFilters {
-  status: 'all' | 'uploaded' | 'batch-created' | 'submitted' | 'processing' | 'completed' | 'failed' | 'pr-created'
+export interface PipelineFilters {
+  status: 'all' | PipelineStatus
+  sessionType: 'all' | SessionType
   search: string
 }
 
-export function useChanges() {
-  const changes = ref<ChangeSession[]>([])
-  const selectedChange = ref<ChangeSession | null>(null)
+export function usePipeline() {
+  const uploads = ref<Upload[]>([])
+  const selectedUpload = ref<Upload | null>(null)
   const loading = ref(false)
   const error = ref<string | null>(null)
-  const filters = ref<ChangeFilters>({
+  const filters = ref<PipelineFilters>({
     status: 'all',
+    sessionType: 'all',
     search: ''
   })
 
-  // Fetch all change sessions
-  const fetchChanges = async () => {
+  // Fetch all uploads (includes both full uploads and change sessions)
+  const fetchUploads = async () => {
     loading.value = true
     error.value = null
     
@@ -28,83 +30,101 @@ export function useChanges() {
         params.append('status', filters.value.status)
       }
       
-      const url = `/api/changes${params.toString() ? `?${params.toString()}` : ''}`
-      const response = await api.get<{ changes: ChangeSession[] }>(url)
+      const url = `/api/uploads${params.toString() ? `?${params.toString()}` : ''}`
+      const response = await api.get<{ uploads: Upload[] }>(url)
       
-      changes.value = response.changes || []
+      uploads.value = response.uploads || []
     } catch (err) {
-      error.value = err instanceof Error ? err.message : 'Failed to fetch changes'
-      console.error('Error fetching changes:', err)
+      error.value = err instanceof Error ? err.message : 'Failed to fetch uploads'
+      console.error('Error fetching uploads:', err)
     } finally {
       loading.value = false
     }
   }
 
-  // Fetch single change session
-  const fetchChange = async (sessionId: string) => {
+  // Fetch single upload session
+  const fetchUpload = async (senderId: string) => {
     loading.value = true
     error.value = null
     
     try {
-      const response = await api.get<ChangeSession>(`/api/changes/${sessionId}`)
-      selectedChange.value = response
+      const response = await api.get<any>(`/api/uploads/${senderId}`)
+      selectedUpload.value = response.upload || response
       return response
     } catch (err) {
-      error.value = err instanceof Error ? err.message : 'Failed to fetch change'
-      console.error('Error fetching change:', err)
+      error.value = err instanceof Error ? err.message : 'Failed to fetch upload'
+      console.error('Error fetching upload:', err)
       return null
     } finally {
       loading.value = false
     }
   }
 
-  // Process a change session (create batch)
-  const processChange = async (sessionId: string) => {
+  // Process a session (create batch) - works for both session types
+  const processSession = async (senderId: string) => {
     try {
-      await api.post(`/translate/changes/${sessionId}/process`, {})
-      await fetchChange(sessionId)
-      await fetchChanges()
+      const upload = uploads.value.find(u => u.senderId === senderId)
+      if (upload?.sessionType === 'change-session') {
+        await api.post(`/translate/changes/${senderId}/process`, {})
+      } else {
+        await api.post(`/translate/batch`, { senderId })
+      }
+      await fetchUpload(senderId)
+      await fetchUploads()
     } catch (err) {
-      error.value = err instanceof Error ? err.message : 'Failed to process change'
-      console.error('Error processing change:', err)
+      error.value = err instanceof Error ? err.message : 'Failed to process session'
+      console.error('Error processing session:', err)
       throw err
     }
   }
 
-  // Finalize a change session (create PR)
-  const finalizeChange = async (sessionId: string) => {
+  // Finalize a session (create PR) - works for both session types
+  const finalizeSession = async (senderId: string) => {
     try {
-      await api.post(`/translate/changes/${sessionId}/finalize`, {})
-      await fetchChange(sessionId)
-      await fetchChanges()
+      const upload = uploads.value.find(u => u.senderId === senderId)
+      if (upload?.sessionType === 'change-session') {
+        await api.post(`/translate/changes/${senderId}/finalize`, {})
+      } else {
+        await api.post(`/github/finalize`, { senderId })
+      }
+      await fetchUpload(senderId)
+      await fetchUploads()
     } catch (err) {
-      error.value = err instanceof Error ? err.message : 'Failed to finalize change'
-      console.error('Error finalizing change:', err)
+      error.value = err instanceof Error ? err.message : 'Failed to finalize session'
+      console.error('Error finalizing session:', err)
       throw err
     }
   }
 
-  // Delete a change session
-  const deleteChange = async (sessionId: string) => {
+  // Delete a session
+  const deleteSession = async (senderId: string) => {
     try {
-      await api.delete(`/api/changes/${sessionId}`)
-      changes.value = changes.value.filter(c => c.sessionId !== sessionId)
-      if (selectedChange.value?.sessionId === sessionId) {
-        selectedChange.value = null
+      await api.delete(`/api/uploads/${senderId}`)
+      uploads.value = uploads.value.filter(u => u.senderId !== senderId)
+      if (selectedUpload.value?.senderId === senderId) {
+        selectedUpload.value = null
       }
     } catch (err) {
-      error.value = err instanceof Error ? err.message : 'Failed to delete change'
-      console.error('Error deleting change:', err)
+      error.value = err instanceof Error ? err.message : 'Failed to delete session'
+      console.error('Error deleting session:', err)
       throw err
     }
   }
 
   // Retry batch output processing
-  const retryBatchOutput = async (sessionId: string) => {
+  const retryBatchOutput = async (senderId: string) => {
     try {
-      await api.post(`/translate/changes/${sessionId}/retry-batch-output`, {})
-      await fetchChange(sessionId)
-      await fetchChanges()
+      const upload = uploads.value.find(u => u.senderId === senderId)
+      if (upload?.sessionType === 'change-session') {
+        await api.post(`/translate/changes/${senderId}/retry-batch-output`, {})
+      } else {
+        const batchId = upload?.batchIds?.[0]
+        if (batchId) {
+          await api.post(`/translate/batch/${batchId}/process`, {})
+        }
+      }
+      await fetchUpload(senderId)
+      await fetchUploads()
     } catch (err) {
       error.value = err instanceof Error ? err.message : 'Failed to retry batch output'
       console.error('Error retrying batch output:', err)
@@ -113,11 +133,16 @@ export function useChanges() {
   }
 
   // Retry PR creation
-  const retryPR = async (sessionId: string) => {
+  const retryPR = async (senderId: string) => {
     try {
-      await api.post(`/translate/changes/${sessionId}/retry-pr`, {})
-      await fetchChange(sessionId)
-      await fetchChanges()
+      const upload = uploads.value.find(u => u.senderId === senderId)
+      if (upload?.sessionType === 'change-session') {
+        await api.post(`/translate/changes/${senderId}/retry-pr`, {})
+      } else {
+        await api.post(`/github/finalize`, { senderId })
+      }
+      await fetchUpload(senderId)
+      await fetchUploads()
     } catch (err) {
       error.value = err instanceof Error ? err.message : 'Failed to retry PR creation'
       console.error('Error retrying PR:', err)
@@ -128,12 +153,15 @@ export function useChanges() {
   // Reset session
   // full=false: Only reset PR step (keep translations)
   // full=true: Reset all steps (delete translations, start from scratch)
-  const resetSession = async (sessionId: string, full = false) => {
+  const resetSession = async (senderId: string, full = false) => {
     try {
-      const queryParam = full ? '?full=true' : ''
-      await api.post(`/translate/changes/${sessionId}/reset${queryParam}`, {})
-      await fetchChange(sessionId)
-      await fetchChanges()
+      const upload = uploads.value.find(u => u.senderId === senderId)
+      if (upload?.sessionType === 'change-session') {
+        const queryParam = full ? '?full=true' : ''
+        await api.post(`/translate/changes/${senderId}/reset${queryParam}`, {})
+      }
+      await fetchUpload(senderId)
+      await fetchUploads()
     } catch (err) {
       error.value = err instanceof Error ? err.message : 'Failed to reset session'
       console.error('Error resetting session:', err)
@@ -141,70 +169,96 @@ export function useChanges() {
     }
   }
 
-  // Get change status
-  const getChangeStatus = async (sessionId: string) => {
+  // Get session status
+  const getSessionStatus = async (senderId: string) => {
     try {
-      const response = await api.get(`/translate/changes/${sessionId}/status`)
-      return response
+      const upload = uploads.value.find(u => u.senderId === senderId)
+      if (upload?.sessionType === 'change-session') {
+        return await api.get(`/translate/changes/${senderId}/status`)
+      }
+      return await fetchUpload(senderId)
     } catch (err) {
       error.value = err instanceof Error ? err.message : 'Failed to get status'
-      console.error('Error getting change status:', err)
+      console.error('Error getting session status:', err)
       return null
     }
   }
 
-  // Filtered changes based on search
-  const filteredChanges = computed(() => {
-    if (!filters.value.search) {
-      return changes.value
+  // Filtered uploads based on search and filters
+  const filteredUploads = computed(() => {
+    let filtered = uploads.value
+
+    // Filter by session type
+    if (filters.value.sessionType !== 'all') {
+      filtered = filtered.filter(u => u.sessionType === filters.value.sessionType)
     }
-    
-    const search = filters.value.search.toLowerCase()
-    return changes.value.filter(change =>
-      change.sessionId.toLowerCase().includes(search) ||
-      change.repositoryName.toLowerCase().includes(search) ||
-      change.commit.message.toLowerCase().includes(search) ||
-      change.commit.author?.toLowerCase().includes(search)
-    )
+
+    // Filter by search
+    if (filters.value.search) {
+      const search = filters.value.search.toLowerCase()
+      filtered = filtered.filter(upload => {
+        const matchesSenderId = upload.senderId.toLowerCase().includes(search)
+        const matchesRepo = upload.repository
+          ? `${upload.repository.owner}/${upload.repository.name}`.toLowerCase().includes(search)
+          : false
+        const matchesCommit = upload.commit
+          ? upload.commit.message.toLowerCase().includes(search) ||
+            upload.commit.author?.toLowerCase().includes(search)
+          : false
+        
+        return matchesSenderId || matchesRepo || matchesCommit
+      })
+    }
+
+    return filtered
   })
 
   // Stats
   const stats = computed(() => {
-    const total = changes.value.length
-    const byStatus = changes.value.reduce((acc, change) => {
-      acc[change.status] = (acc[change.status] || 0) + 1
+    const total = uploads.value.length
+    const byStatus = uploads.value.reduce((acc, upload) => {
+      const status = upload.pipelineStatus || upload.status
+      acc[status] = (acc[status] || 0) + 1
       return acc
     }, {} as Record<string, number>)
     
-    const byAutomation = changes.value.reduce((acc, change) => {
-      acc[change.automationMode] = (acc[change.automationMode] || 0) + 1
+    const bySessionType = uploads.value.reduce((acc, upload) => {
+      acc[upload.sessionType] = (acc[upload.sessionType] || 0) + 1
+      return acc
+    }, {} as Record<string, number>)
+
+    const byAutomation = uploads.value.reduce((acc, upload) => {
+      if (upload.automationMode) {
+        acc[upload.automationMode] = (acc[upload.automationMode] || 0) + 1
+      }
       return acc
     }, {} as Record<string, number>)
 
     return {
       total,
       byStatus,
+      bySessionType,
       byAutomation,
-      withErrors: changes.value.filter(c => c.hasErrors).length
+      withErrors: uploads.value.filter(u => u.hasErrors).length
     }
   })
 
   return {
-    changes,
-    selectedChange,
+    uploads,
+    selectedUpload,
     loading,
     error,
     filters,
-    filteredChanges,
+    filteredUploads,
     stats,
-    fetchChanges,
-    fetchChange,
-    processChange,
-    finalizeChange,
-    deleteChange,
+    fetchUploads,
+    fetchUpload,
+    processSession,
+    finalizeSession,
+    deleteSession,
     retryBatchOutput,
     retryPR,
     resetSession,
-    getChangeStatus
+    getSessionStatus
   }
 }
