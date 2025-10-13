@@ -61,88 +61,69 @@ export interface ProcessDeltaBatchResult {
 
 /**
  * Parse custom_id to extract sessionId, targetLocale, and fileName
- * Format: {sessionId}_{targetLocale}_{fileName}
+ * Format: {sessionId}__{targetLocale}__{originalFileName}__{hash}
+ * Example: calmproton-pxguru-804c881__ru__en_delta_json__914642da
  */
-function parseCustomId(customId: string): { sessionId: string; targetLocale: string; fileName: string } | null {
-  const parts = customId.split('_')
+function parseCustomId(customId: string): { sessionId: string; targetLocale: string; sourceFileName: string } | null {
+  const parts = customId.split('__')
   
   if (parts.length < 3) {
+    log.error('Invalid custom_id format', { customId, parts })
     return null
   }
 
-  // The fileName might contain underscores, so we need to reconstruct it
-  // Format is: sessionId_locale_filename.delta.json
   const sessionId = parts[0]
   const targetLocale = parts[1]
-  const fileName = parts.slice(2).join('_')
+  // The source file name is in format like "en_delta_json" -> should be "en.json"
+  const sourceFileNamePart = parts[2]
+  
+  // Convert "en_delta_json" to "en.json"
+  const sourceFileName = sourceFileNamePart.replace('_delta_json', '.json')
 
-  return { sessionId, targetLocale, fileName }
+  return { sessionId, targetLocale, sourceFileName }
 }
 
 /**
- * Load original file from change session
+ * Load the source delta file to get the structure
  */
-function loadOriginalFile(sessionId: string, fileName: string): Record<string, any> | null {
-  // Remove .delta.json suffix to get original filename
-  const originalFileName = fileName.replace('.delta.json', '.json')
-  const originalPath = join(TMP_DIR, sessionId, 'changes', 'original', originalFileName)
+function loadSourceDelta(sessionId: string, sourceFileName: string): JsonDelta | null {
+  const deltaPath = join(TMP_DIR, sessionId, 'deltas', 'en', 'global', sourceFileName.replace('.json', '.delta.json'))
 
-  if (!existsSync(originalPath)) {
-    log.warn('Original file not found', { sessionId, fileName: originalFileName, originalPath })
+  if (!existsSync(deltaPath)) {
+    log.warn('Source delta file not found', { sessionId, sourceFileName, deltaPath })
     return null
   }
 
   try {
-    const content = readFileSync(originalPath, 'utf-8')
-    return JSON.parse(content)
+    const content = readFileSync(deltaPath, 'utf-8')
+    return JSON.parse(content) as JsonDelta
   } catch (error) {
-    log.error('Failed to load original file', { sessionId, fileName: originalFileName, error })
+    log.error('Failed to load source delta file', { sessionId, sourceFileName, error })
     return null
   }
 }
 
 /**
- * Merge translated delta into original file
+ * Save translation delta file (for incremental changes, we only save what changed)
  */
-function mergeTranslatedDelta(
-  original: Record<string, any>,
-  translatedDelta: Record<string, any>
-): Record<string, any> {
-  // Create a copy of the original
-  const merged = { ...original }
-
-  // Apply all translated keys from the delta
-  for (const [key, value] of Object.entries(translatedDelta)) {
-    merged[key] = value
-  }
-
-  return merged
-}
-
-/**
- * Save merged translation file
- */
-function saveTranslationFile(
+function saveTranslationDelta(
   sessionId: string,
   targetLocale: string,
-  fileName: string,
-  content: Record<string, any>
+  sourceFileName: string,
+  translatedDelta: Record<string, any>
 ): void {
-  // Remove .delta.json suffix to get original filename
-  const originalFileName = fileName.replace('.delta.json', '.json')
-  
-  // Determine file type from path in original structure
-  // For now, assume global type (JSON files)
-  const outputPath = join(TMP_DIR, sessionId, 'translations', targetLocale, 'global', originalFileName)
+  // Save as a delta file that can be applied to the repo
+  const outputPath = join(TMP_DIR, sessionId, 'translations', targetLocale, 'global', sourceFileName)
   
   // Create directory if needed
   const outputDir = dirname(outputPath)
   mkdirSync(outputDir, { recursive: true })
 
-  // Write file
-  writeFileSync(outputPath, JSON.stringify(content, null, 2), 'utf-8')
+  // Write only the translated changes (not merged with original)
+  // This will be used to update specific keys in the GitHub repo
+  writeFileSync(outputPath, JSON.stringify(translatedDelta, null, 2), 'utf-8')
   
-  log.debug('Saved translation file', { sessionId, targetLocale, fileName: originalFileName, outputPath })
+  log.debug('Saved translation delta', { sessionId, targetLocale, sourceFileName, outputPath, keyCount: Object.keys(translatedDelta).length })
 }
 
 /**
@@ -167,7 +148,7 @@ function processBatchOutputLine(
       return {
         customId: output.custom_id,
         targetLocale: parsed.targetLocale,
-        fileName: parsed.fileName,
+        fileName: parsed.sourceFileName,
         filePath: '',
         status: 'error',
         errorMessage: JSON.stringify(output.error)
@@ -195,7 +176,7 @@ function processBatchOutputLine(
       return {
         customId: output.custom_id,
         targetLocale: parsed.targetLocale,
-        fileName: parsed.fileName,
+        fileName: parsed.sourceFileName,
         filePath: '',
         status: 'error',
         errorMessage: 'No content in response'
@@ -211,39 +192,31 @@ function processBatchOutputLine(
       return {
         customId: output.custom_id,
         targetLocale: parsed.targetLocale,
-        fileName: parsed.fileName,
+        fileName: parsed.sourceFileName,
         filePath: '',
         status: 'error',
         errorMessage: 'Invalid JSON in translated content'
       }
     }
 
-    // Load original file
-    const original = loadOriginalFile(sessionId, parsed.fileName)
-    if (!original) {
-      return {
-        customId: output.custom_id,
-        targetLocale: parsed.targetLocale,
-        fileName: parsed.fileName,
-        filePath: '',
-        status: 'error',
-        errorMessage: 'Original file not found'
-      }
-    }
-
-    // Merge translated delta into original
-    const merged = mergeTranslatedDelta(original, translatedDelta)
-
-    // Save merged file
-    saveTranslationFile(sessionId, parsed.targetLocale, parsed.fileName, merged)
+    // Save translation delta (we don't need to merge - GitHub has the originals)
+    saveTranslationDelta(sessionId, parsed.targetLocale, parsed.sourceFileName, translatedDelta)
 
     const translatedKeysCount = Object.keys(translatedDelta).length
+    const outputPath = join(TMP_DIR, sessionId, 'translations', parsed.targetLocale, 'global', parsed.sourceFileName)
+
+    log.debug('Processed translation delta', {
+      customId: output.custom_id,
+      targetLocale: parsed.targetLocale,
+      sourceFileName: parsed.sourceFileName,
+      keysTranslated: translatedKeysCount
+    })
 
     return {
       customId: output.custom_id,
       targetLocale: parsed.targetLocale,
-      fileName: parsed.fileName,
-      filePath: join(TMP_DIR, sessionId, 'translations', parsed.targetLocale, 'global', parsed.fileName.replace('.delta.json', '.json')),
+      fileName: parsed.sourceFileName,
+      filePath: outputPath,
       status: 'success',
       translatedKeysCount
     }

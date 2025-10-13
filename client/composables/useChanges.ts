@@ -99,6 +99,32 @@ export function useChanges() {
     }
   }
 
+  // Retry batch output processing
+  const retryBatchOutput = async (sessionId: string) => {
+    try {
+      await api.post(`/translate/changes/${sessionId}/retry-batch-output`, {})
+      await fetchChange(sessionId)
+      await fetchChanges()
+    } catch (err) {
+      error.value = err instanceof Error ? err.message : 'Failed to retry batch output'
+      console.error('Error retrying batch output:', err)
+      throw err
+    }
+  }
+
+  // Retry PR creation
+  const retryPR = async (sessionId: string) => {
+    try {
+      await api.post(`/translate/changes/${sessionId}/retry-pr`, {})
+      await fetchChange(sessionId)
+      await fetchChanges()
+    } catch (err) {
+      error.value = err instanceof Error ? err.message : 'Failed to retry PR creation'
+      console.error('Error retrying PR:', err)
+      throw err
+    }
+  }
+
   // Get change status
   const getChangeStatus = async (sessionId: string) => {
     try {
@@ -160,6 +186,8 @@ export function useChanges() {
     processChange,
     finalizeChange,
     deleteChange,
+    retryBatchOutput,
+    retryPR,
     getChangeStatus
   }
 }

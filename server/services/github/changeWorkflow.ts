@@ -13,6 +13,32 @@ import { join } from 'node:path'
 
 const log = createScopedLogger('services:github:changeWorkflow')
 
+/**
+ * Deep merge two objects, with source overriding target
+ */
+function deepMerge(target: any, source: any): any {
+  if (typeof target !== 'object' || target === null) {
+    return source
+  }
+  if (typeof source !== 'object' || source === null) {
+    return target
+  }
+
+  const result = { ...target }
+  
+  for (const key in source) {
+    if (Object.prototype.hasOwnProperty.call(source, key)) {
+      if (typeof source[key] === 'object' && source[key] !== null && !Array.isArray(source[key])) {
+        result[key] = deepMerge(target[key], source[key])
+      } else {
+        result[key] = source[key]
+      }
+    }
+  }
+  
+  return result
+}
+
 const TMP_DIR = join(process.cwd(), 'tmp')
 
 interface CreateChangePROptions {
@@ -276,25 +302,98 @@ ${metadata.targetLocales.map(locale => `- ${locale}`).join('\n')}
     return acc
   }, {} as Record<string, typeof translationFiles>)
 
-  // Determine target paths based on repository structure
-  // Use metadata's targetPathPattern if available, otherwise use default
+  // Determine target paths based on the original file paths from metadata
   const getTargetPath = (locale: string, type: string, fileName: string): string => {
-    // Default pattern for most repos
+    // Find the original file path from metadata
+    const originalChange = metadata.changes?.find(c => c.type === type && c.relativePath === fileName)
+    
+    if (originalChange?.path) {
+      // Use the original path structure, but replace the source locale filename with target locale
+      // For example: "i18n/locales/en.json" -> "i18n/locales/ru.json"
+      const pathParts = originalChange.path.split('/')
+      const sourceFileName = pathParts[pathParts.length - 1]
+      
+      // Replace source locale filename with target locale filename
+      // For global files: en.json -> ru.json
+      // For content/page files: keep the structure but in the target locale folder
+      if (type === 'global') {
+        // Replace en.json with {locale}.json
+        const targetFileName = sourceFileName.replace(/^[a-z]{2}\.json$/, `${locale}.json`)
+        pathParts[pathParts.length - 1] = targetFileName
+        return pathParts.join('/')
+      } else {
+        // For content/page files, replace the locale folder
+        // e.g., i18n/en/content/page.md -> i18n/ru/content/page.md
+        const localeIndex = pathParts.findIndex(part => part === metadata.sourceLocale)
+        if (localeIndex !== -1) {
+          pathParts[localeIndex] = locale
+        }
+        return pathParts.join('/')
+      }
+    }
+    
+    // Fallback to default pattern
     if (type === 'content') {
       return `i18n/${locale}/${fileName}`
     } else if (type === 'global') {
-      return `locales/${locale}/${fileName}`
+      return `locales/${locale}/${fileName.replace(/^[a-z]{2}\.json$/, `${locale}.json`)}`
     } else if (type === 'page') {
       return `locales/${locale}/${fileName}`
     }
     return `${type}/${locale}/${fileName}`
   }
 
-  // Prepare file changes
-  const fileChanges = translationFiles.map(file => ({
-    path: getTargetPath(file.locale, file.type, file.fileName),
-    content: file.content
-  }))
+  // Prepare file changes by merging deltas with existing files
+  const fileChanges: Array<{ path: string; content: string }> = []
+  
+  for (const file of translationFiles) {
+    const targetPath = getTargetPath(file.locale, file.type, file.fileName)
+    
+    // For JSON files (global/page), merge the delta with existing content
+    if (file.type === 'global' || file.type === 'page') {
+      try {
+        // Fetch existing file from GitHub
+        const existingContent = await client.getFileContent(
+          repository.owner,
+          repository.name,
+          targetPath,
+          repository.baseBranch
+        )
+        
+        // Parse existing and delta JSON
+        const existing = JSON.parse(existingContent)
+        const delta = JSON.parse(file.content)
+        
+        // Merge delta into existing (deep merge for nested objects)
+        const merged = deepMerge(existing, delta)
+        
+        fileChanges.push({
+          path: targetPath,
+          content: JSON.stringify(merged, null, 2)
+        })
+        
+        log.debug('Merged delta with existing file', {
+          targetPath,
+          existingKeys: Object.keys(existing).length,
+          deltaKeys: Object.keys(delta).length,
+          mergedKeys: Object.keys(merged).length
+        })
+      } catch (error) {
+        // File doesn't exist yet, use delta as-is
+        log.warn('Target file does not exist, using delta as-is', { targetPath, error })
+        fileChanges.push({
+          path: targetPath,
+          content: file.content
+        })
+      }
+    } else {
+      // For markdown files, use content as-is (they're complete files, not deltas)
+      fileChanges.push({
+        path: targetPath,
+        content: file.content
+      })
+    }
+  }
 
   log.info('Committing translation files', {
     sessionId,

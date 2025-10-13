@@ -431,6 +431,149 @@ changesRoutes.post('/:sessionId/finalize', async ({ params, set }) => {
 })
 
 /**
+ * POST /translate/changes/:sessionId/retry-batch-output
+ * Retry processing batch output files
+ */
+changesRoutes.post('/:sessionId/retry-batch-output', async ({ params, set }) => {
+  const { sessionId } = params
+
+  try {
+    log.info('Retrying batch output processing', { sessionId })
+
+    const metadata = await loadChangeSession(sessionId)
+    if (!metadata) {
+      set.status = 404
+      const errorResponse: ErrorResponse = { 
+        error: `Change session ${sessionId} not found` 
+      }
+      return errorResponse
+    }
+
+    const batchId = metadata.steps.batchCreated?.batchId
+    if (!batchId) {
+      set.status = 400
+      const errorResponse: ErrorResponse = { 
+        error: 'No batch ID found for this session' 
+      }
+      return errorResponse
+    }
+
+    // Import and call the output processor
+    const { processDeltaBatchOutput } = await import('../services/translation/deltaBatchOutputProcessor')
+    
+    log.info('Processing delta batch output', { sessionId, batchId })
+    const result = await processDeltaBatchOutput(sessionId, batchId)
+
+    log.info('Delta batch output processed successfully', {
+      sessionId,
+      batchId,
+      processedCount: result.processedCount,
+      errorCount: result.errorCount
+    })
+
+    // Trigger PR creation if output processing succeeded
+    if (result.processedCount > 0) {
+      const { createChangePR } = await import('../services/github/changeWorkflow')
+      
+      try {
+        log.info('Creating pull request for change session', { sessionId })
+        const prResult = await createChangePR({ sessionId })
+
+        await updateChangeSessionStatus(sessionId, 'pr-created', {
+          prCreated: {
+            completed: true,
+            timestamp: new Date().toISOString(),
+            pullRequestNumber: prResult.pullRequestNumber,
+            pullRequestUrl: prResult.pullRequestUrl
+          }
+        })
+
+        log.info('Pull request created successfully', {
+          sessionId,
+          prNumber: prResult.pullRequestNumber,
+          prUrl: prResult.pullRequestUrl
+        })
+      } catch (prError) {
+        log.error('Failed to create pull request after output processing', { sessionId, error: prError })
+        // Don't fail the whole request, just log the error
+      }
+    }
+
+    return {
+      success: true,
+      sessionId,
+      batchId,
+      processedCount: result.processedCount,
+      errorCount: result.errorCount,
+      translationsByLocale: result.translationsByLocale
+    }
+  } catch (error) {
+    log.error('Failed to retry batch output processing', { sessionId, error })
+    set.status = 500
+    const errorResponse: ErrorResponse = { 
+      error: error instanceof Error ? error.message : 'Failed to retry batch output processing' 
+    }
+    return errorResponse
+  }
+})
+
+/**
+ * POST /translate/changes/:sessionId/retry-pr
+ * Retry creating pull request
+ */
+changesRoutes.post('/:sessionId/retry-pr', async ({ params, set }) => {
+  const { sessionId } = params
+
+  try {
+    log.info('Retrying PR creation', { sessionId })
+
+    const metadata = await loadChangeSession(sessionId)
+    if (!metadata) {
+      set.status = 404
+      const errorResponse: ErrorResponse = { 
+        error: `Change session ${sessionId} not found` 
+      }
+      return errorResponse
+    }
+
+    const { createChangePR } = await import('../services/github/changeWorkflow')
+    
+    const result = await createChangePR({ sessionId })
+
+    await updateChangeSessionStatus(sessionId, 'pr-created', {
+      prCreated: {
+        completed: true,
+        timestamp: new Date().toISOString(),
+        pullRequestNumber: result.pullRequestNumber,
+        pullRequestUrl: result.pullRequestUrl
+      }
+    })
+
+    log.info('Pull request created successfully', {
+      sessionId,
+      prNumber: result.pullRequestNumber,
+      prUrl: result.pullRequestUrl
+    })
+
+    return {
+      success: true,
+      sessionId,
+      pullRequestNumber: result.pullRequestNumber,
+      pullRequestUrl: result.pullRequestUrl,
+      branchName: result.branchName,
+      filesChanged: result.filesChanged
+    }
+  } catch (error) {
+    log.error('Failed to retry PR creation', { sessionId, error })
+    set.status = 500
+    const errorResponse: ErrorResponse = { 
+      error: error instanceof Error ? error.message : 'Failed to retry PR creation' 
+    }
+    return errorResponse
+  }
+})
+
+/**
  * DELETE /translate/changes/:sessionId
  * Delete a change session
  */

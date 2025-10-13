@@ -17,11 +17,13 @@ const {
   fetchChanges,
   processChange,
   finalizeChange,
-  deleteChange
+  deleteChange,
+  retryBatchOutput,
+  retryPR
 } = useChanges()
 
 // Auto-refresh every 10 seconds
-const { pause, resume } = useRefreshInterval(fetchChanges, 10000)
+const { pause, resume } = useRefreshInterval(fetchChanges, { interval: 10000 })
 
 onMounted(() => {
   fetchChanges()
@@ -55,6 +57,24 @@ const handleDelete = async (sessionId: string) => {
   pause()
   try {
     await deleteChange(sessionId)
+  } finally {
+    resume()
+  }
+}
+
+const handleRetryBatchOutput = async (sessionId: string) => {
+  pause()
+  try {
+    await retryBatchOutput(sessionId)
+  } finally {
+    resume()
+  }
+}
+
+const handleRetryPR = async (sessionId: string) => {
+  pause()
+  try {
+    await retryPR(sessionId)
   } finally {
     resume()
   }
@@ -158,6 +178,8 @@ const handleDelete = async (sessionId: string) => {
         @process="handleProcess"
         @finalize="handleFinalize"
         @delete="handleDelete"
+        @retry-batch-output="handleRetryBatchOutput"
+        @retry-pr="handleRetryPR"
         @refresh="fetchChanges"
       />
     </div>

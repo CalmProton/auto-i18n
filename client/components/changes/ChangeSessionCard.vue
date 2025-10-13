@@ -17,12 +17,22 @@ const emit = defineEmits<{
   process: [sessionId: string]
   finalize: [sessionId: string]
   delete: [sessionId: string]
+  retryBatchOutput: [sessionId: string]
+  retryPr: [sessionId: string]
   refresh: []
 }>()
 
-const { showToast } = useToast()
+const { error: showError } = useToast()
 const processing = ref(false)
 const deleting = ref(false)
+const showAllErrors = ref(false)
+const retrying = ref<string | null>(null)
+
+const showToast = (options: { title: string; description: string; variant?: 'default' | 'destructive' }) => {
+  if (options.variant === 'destructive') {
+    showError(options.title, options.description)
+  }
+}
 
 const statusVariant = (status: string) => {
   switch (status) {
@@ -89,6 +99,36 @@ const handleDelete = async () => {
     })
   } finally {
     deleting.value = false
+  }
+}
+
+const handleRetryBatchOutput = async () => {
+  retrying.value = 'batch-output'
+  try {
+    emit('retryBatchOutput', props.session.sessionId)
+  } catch (error) {
+    showToast({
+      title: 'Error',
+      description: error instanceof Error ? error.message : 'Failed to retry batch output',
+      variant: 'destructive'
+    })
+  } finally {
+    retrying.value = null
+  }
+}
+
+const handleRetryPR = async () => {
+  retrying.value = 'pr'
+  try {
+    emit('retryPr', props.session.sessionId)
+  } catch (error) {
+    showToast({
+      title: 'Error',
+      description: error instanceof Error ? error.message : 'Failed to retry PR creation',
+      variant: 'destructive'
+    })
+  } finally {
+    retrying.value = null
   }
 }
 </script>
@@ -197,20 +237,60 @@ const handleDelete = async () => {
 
       <!-- Errors -->
       <div v-if="session.hasErrors" class="rounded-md bg-destructive/10 p-3">
-        <div class="flex items-center gap-2 text-sm text-destructive font-medium mb-2">
-          <AlertCircle class="h-4 w-4" />
-          {{ session.errorCount }} error(s)
-        </div>
-        <div v-if="session.errors" class="space-y-1">
-          <div
-            v-for="(error, index) in session.errors.slice(0, 3)"
-            :key="index"
-            class="text-xs text-muted-foreground"
-          >
-            <span class="font-medium">{{ error.step }}:</span> {{ error.message }}
+        <div class="flex items-center justify-between mb-2">
+          <div class="flex items-center gap-2 text-sm text-destructive font-medium">
+            <AlertCircle class="h-4 w-4" />
+            {{ session.errorCount }} error(s)
           </div>
-          <div v-if="session.errors.length > 3" class="text-xs text-muted-foreground">
-            ...and {{ session.errors.length - 3 }} more
+          <div class="flex items-center gap-2">
+            <Button
+              v-if="session.status === 'completed' && session.hasErrors"
+              size="sm"
+              variant="outline"
+              @click="handleRetryBatchOutput"
+              :disabled="retrying === 'batch-output'"
+              class="h-6 text-xs"
+            >
+              Retry Output
+            </Button>
+            <Button
+              v-if="session.status === 'completed' && !session.steps.prCreated.completed"
+              size="sm"
+              variant="outline"
+              @click="handleRetryPR"
+              :disabled="retrying === 'pr'"
+              class="h-6 text-xs"
+            >
+              Retry PR
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              @click="showAllErrors = !showAllErrors"
+              class="h-6 text-xs"
+            >
+              {{ showAllErrors ? 'Hide' : 'Show All' }}
+            </Button>
+          </div>
+        </div>
+        <div v-if="session.errors" class="space-y-2">
+          <div
+            v-for="(error, index) in (showAllErrors ? session.errors : session.errors.slice(0, 3))"
+            :key="index"
+            class="rounded bg-background/50 p-2"
+          >
+            <div class="flex items-start justify-between gap-2">
+              <div class="flex-1 space-y-1">
+                <div class="text-xs font-medium text-destructive">{{ error.step }}</div>
+                <div class="text-xs text-muted-foreground break-words">{{ error.message }}</div>
+                <div class="text-[10px] text-muted-foreground">
+                  {{ new Date(error.timestamp).toLocaleString() }}
+                </div>
+              </div>
+            </div>
+          </div>
+          <div v-if="!showAllErrors && session.errors.length > 3" class="text-xs text-muted-foreground text-center">
+            ...and {{ session.errors.length - 3 }} more (click "Show All" to expand)
           </div>
         </div>
       </div>
