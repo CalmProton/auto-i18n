@@ -6,6 +6,10 @@
 export type UploadStatus = 'uploaded' | 'batched' | 'translating' | 'completed'
 export type BatchStatus = 'pending' | 'submitted' | 'processing' | 'completed' | 'failed' | 'cancelled' | 'partially_failed'
 export type JobType = 'openai-batch' | 'regular-translation'
+export type SessionType = 'full-upload' | 'change-session'
+export type ChangeStatus = 'uploaded' | 'batch-created' | 'submitted' | 'processing' | 'completed' | 'failed' | 'pr-created'
+export type AutomationMode = 'auto' | 'manual'
+export type TranslationType = 'full' | 'delta'
 
 export interface FileCount {
   content: number
@@ -20,8 +24,40 @@ export interface TranslationProgress {
   percentage: number
 }
 
+export interface StepStatus {
+  completed: boolean
+  timestamp?: string
+  error?: string
+}
+
+export interface PipelineSteps {
+  uploaded: StepStatus
+  batchCreated: StepStatus & { batchId?: string }
+  submitted: StepStatus & { openAiBatchId?: string }
+  processing: StepStatus & { progress?: number }
+  outputReceived: StepStatus
+  translationsProcessed: StepStatus & { translationCount?: number }
+  prCreated: StepStatus & { pullRequestNumber?: number; pullRequestUrl?: string }
+}
+
+export interface CommitInfo {
+  sha: string
+  shortSha: string
+  message: string
+  author?: string
+  timestamp: string
+}
+
+export interface ChangeCount {
+  added: number
+  modified: number
+  deleted: number
+  total: number
+}
+
 export interface Upload {
   senderId: string
+  sessionType: SessionType
   repository?: { owner: string; name: string }
   sourceLocale: string
   targetLocales: string[]
@@ -33,6 +69,14 @@ export interface Upload {
   jobIds?: string[]
   hasTranslations: boolean
   translationProgress?: TranslationProgress
+  // Pipeline-specific fields
+  pipelineStatus?: ChangeStatus
+  steps?: PipelineSteps
+  commit?: CommitInfo
+  changeCount?: ChangeCount
+  automationMode?: AutomationMode
+  hasErrors?: boolean
+  errorCount?: number
 }
 
 export interface BatchProgress {
@@ -76,6 +120,8 @@ export interface TranslationFileStatus {
 
 export interface TranslationSession {
   senderId: string
+  sessionType: SessionType
+  translationType: TranslationType
   repositoryName?: string
   sourceLocale: string
   targetLocales: string[]
@@ -88,11 +134,13 @@ export interface TranslationSession {
     missing: number
     percentage: number
   }
+  translationPath?: string
   lastUpdated: string
 }
 
 export interface GitHubSession {
   senderId: string
+  sessionType: SessionType
   repositoryName?: string
   repository: { owner: string; name: string; baseBranch: string }
   sourceLocale: string
@@ -102,6 +150,11 @@ export interface GitHubSession {
   hasPullRequest: boolean
   pullRequestNumber?: number
   pullRequestUrl?: string
+  translationProgress?: {
+    completed: number
+    total: number
+    files: number
+  }
 }
 
 export interface SystemStats {
@@ -252,23 +305,12 @@ export interface ChangeSession {
     name: string
     baseBranch: string
   }
-  commit: {
-    sha: string
-    shortSha: string
-    message: string
-    author?: string
-    timestamp: string
-  }
-  status: import('./index').ChangeStatus
-  automationMode: import('./index').AutomationMode
+  commit: CommitInfo
+  status: ChangeStatus
+  automationMode: AutomationMode
   sourceLocale: string
   targetLocales: string[]
-  changeCount: {
-    added: number
-    modified: number
-    deleted: number
-    total: number
-  }
+  changeCount: ChangeCount
   progress: {
     current: number
     total: number

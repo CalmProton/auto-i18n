@@ -7,6 +7,10 @@ export type UploadStatus = 'uploaded' | 'batched' | 'translating' | 'completed'
 export type BatchStatus = 'pending' | 'submitted' | 'processing' | 'completed' | 'failed' | 'cancelled' | 'partially_failed'
 export type JobType = 'openai-batch' | 'regular-translation'
 export type TranslationProvider = 'openai' | 'anthropic' | 'deepseek'
+export type SessionType = 'full-upload' | 'change-session'
+export type PipelineStatus = 'uploaded' | 'batch-created' | 'submitted' | 'processing' | 'completed' | 'failed' | 'pr-created'
+export type AutomationMode = 'auto' | 'manual'
+export type TranslationType = 'full' | 'delta'
 
 export interface DashboardOverview {
   totalUploads: number
@@ -29,8 +33,40 @@ export interface TranslationProgress {
   percentage: number
 }
 
+export interface StepStatus {
+  completed: boolean
+  timestamp?: string
+  error?: string
+}
+
+export interface PipelineSteps {
+  uploaded: StepStatus
+  batchCreated: StepStatus & { batchId?: string }
+  submitted: StepStatus & { openAiBatchId?: string }
+  processing: StepStatus & { progress?: number }
+  outputReceived: StepStatus
+  translationsProcessed: StepStatus & { translationCount?: number }
+  prCreated: StepStatus & { pullRequestNumber?: number; pullRequestUrl?: string }
+}
+
+export interface CommitInfo {
+  sha: string
+  shortSha: string
+  message: string
+  author?: string
+  timestamp: string
+}
+
+export interface ChangeCount {
+  added: number
+  modified: number
+  deleted: number
+  total: number
+}
+
 export interface Upload {
   senderId: string
+  sessionType: SessionType
   repository?: { owner: string; name: string }
   sourceLocale: string
   targetLocales: string[]
@@ -42,6 +78,14 @@ export interface Upload {
   jobIds?: string[]
   hasTranslations: boolean
   translationProgress?: TranslationProgress
+  // Pipeline-specific fields
+  pipelineStatus?: PipelineStatus
+  steps?: PipelineSteps
+  commit?: CommitInfo
+  changeCount?: ChangeCount
+  automationMode?: AutomationMode
+  hasErrors?: boolean
+  errorCount?: number
 }
 
 export interface BatchProgress {
@@ -92,6 +136,8 @@ export interface TranslationFileStatus {
 
 export interface TranslationSession {
   senderId: string
+  sessionType: SessionType
+  translationType: TranslationType
   repositoryName?: string
   sourceLocale: string
   targetLocales: string[]
@@ -104,11 +150,13 @@ export interface TranslationSession {
     missing: number
     percentage: number
   }
+  translationPath?: string
   lastUpdated: string
 }
 
 export interface GitHubSession {
   senderId: string
+  sessionType: SessionType
   repositoryName?: string
   repository: { owner: string; name: string; baseBranch: string }
   sourceLocale: string
@@ -118,6 +166,11 @@ export interface GitHubSession {
   hasPullRequest: boolean
   pullRequestNumber?: number
   pullRequestUrl?: string
+  translationProgress?: {
+    completed: number
+    total: number
+    files: number
+  }
 }
 
 export interface SystemStats {
@@ -257,16 +310,7 @@ export interface AuthValidateResponse {
 }
 
 // Changes types
-export type ChangeStatus = 
-  | 'uploaded' 
-  | 'batch-created' 
-  | 'submitted' 
-  | 'processing' 
-  | 'completed' 
-  | 'failed' 
-  | 'pr-created'
-
-export type AutomationMode = 'auto' | 'manual'
+export type ChangeStatus = PipelineStatus // Alias for backward compatibility
 export type ChangeType = 'added' | 'modified' | 'deleted'
 
 export interface FileChange {
@@ -277,27 +321,10 @@ export interface FileChange {
   relativePath?: string
 }
 
-export interface CommitInfo {
-  sha: string
-  shortSha: string
-  message: string
-  author?: string
-  timestamp: string
-}
-
-export interface StepStatus {
-  completed: boolean
-  timestamp?: string
-  error?: string
-}
-
-export interface ChangeSessionSteps {
-  uploaded: StepStatus
-  batchCreated: StepStatus & { batchId?: string }
-  submitted: StepStatus & { openAiBatchId?: string }
-  processing: StepStatus & { progress?: number }
+// Reuse PipelineSteps defined above
+export type ChangeSessionSteps = PipelineSteps & {
+  // completed step maps to outputReceived + translationsProcessed
   completed: StepStatus & { translationCount?: number }
-  prCreated: StepStatus & { pullRequestNumber?: number; pullRequestUrl?: string }
 }
 
 export interface ChangeSession {
@@ -309,17 +336,12 @@ export interface ChangeSession {
     baseBranch: string
   }
   commit: CommitInfo
-  status: ChangeStatus
+  status: PipelineStatus
   automationMode: AutomationMode
   sourceLocale: string
   targetLocales: string[]
   changes?: FileChange[]
-  changeCount: {
-    added: number
-    modified: number
-    deleted: number
-    total: number
-  }
+  changeCount: ChangeCount
   progress: {
     current: number
     total: number

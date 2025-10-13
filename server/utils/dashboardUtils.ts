@@ -107,7 +107,7 @@ function countFilesRecursive(dir: string): number {
 }
 
 /**
- * Get upload information for a sender
+ * Get upload information for a sender (handles both full uploads and change sessions)
  */
 export function getUploadInfo(senderId: string): Upload | null {
   try {
@@ -120,27 +120,29 @@ export function getUploadInfo(senderId: string): Upload | null {
     const regularMetadataPath = join(senderDir, 'metadata.json')
     const changesMetadataPath = join(senderDir, 'changes', 'metadata.json')
     
-    let metadata: TranslationMetadataFile | null = null
-    let isChangeSession = false
+    let metadata: any = null
+    let sessionType: 'full-upload' | 'change-session' = 'full-upload'
+    let changeMetadata: any = null
     
     if (existsSync(changesMetadataPath)) {
-      metadata = readJsonFile<TranslationMetadataFile>(changesMetadataPath)
-      isChangeSession = true
+      changeMetadata = readJsonFile<any>(changesMetadataPath)
+      sessionType = 'change-session'
+      // Use change metadata for common fields
+      metadata = changeMetadata
     } else if (existsSync(regularMetadataPath)) {
       metadata = readJsonFile<TranslationMetadataFile>(regularMetadataPath)
     }
 
     const sourceLocale = metadata?.sourceLocale || 'en'
     
-    // Determine the source directory based on session type
-    let sourceDir: string
+    // Determine the source directory and count files based on session type
     let fileCount: FileCount
     
-    if (isChangeSession) {
+    if (sessionType === 'change-session') {
       // For changes, files are in changes/original/
       const changesOriginalDir = join(senderDir, 'changes', 'original')
       
-      // Count files directly in the original directory (changes are typically global.json files)
+      // Count files directly in the original directory
       fileCount = { content: 0, global: 0, page: 0, total: 0 }
       if (existsSync(changesOriginalDir)) {
         const files = readdirSync(changesOriginalDir, { withFileTypes: true })
@@ -158,11 +160,10 @@ export function getUploadInfo(senderId: string): Upload | null {
           }
         }
       }
-      sourceDir = changesOriginalDir
     } else {
       // For regular uploads, files are in uploads/{locale}/
       const uploadsDir = join(senderDir, 'uploads')
-      sourceDir = join(uploadsDir, sourceLocale)
+      const sourceDir = join(uploadsDir, sourceLocale)
       fileCount = countFilesByType(sourceDir)
     }
 
@@ -177,27 +178,47 @@ export function getUploadInfo(senderId: string): Upload | null {
           .map((d) => d.name)
       : []
 
-    // Check for translations
-    const translationsDir = join(senderDir, 'translations')
-    const hasTranslations = existsSync(translationsDir)
+    // Check for translations based on session type
+    let translationsDir: string
+    let deltasDir: string | null = null
+    
+    if (sessionType === 'change-session') {
+      // Change sessions can have translations in both locations
+      translationsDir = join(senderDir, 'translations')
+      deltasDir = join(senderDir, 'deltas')
+    } else {
+      translationsDir = join(senderDir, 'translations')
+    }
+    
+    const hasTranslations = existsSync(translationsDir) || (deltasDir && existsSync(deltasDir))
 
     // Calculate translation progress
     let translationProgress
-    if (hasTranslations && targetLocales.length > 0) {
+    if (targetLocales.length > 0) {
       let completedLocales = 0
+      
       for (const locale of targetLocales) {
-        const localeDir = join(translationsDir, locale)
-        if (existsSync(localeDir)) {
-          const localeCount = countFilesByType(localeDir)
-          if (localeCount.total === fileCount.total) {
-            completedLocales++
-          }
+        // Check both translation and delta directories
+        const translationLocaleDir = join(translationsDir, locale)
+        const deltaLocaleDir = deltasDir ? join(deltasDir, locale) : null
+        
+        let localeCount = { content: 0, global: 0, page: 0, total: 0 }
+        
+        if (existsSync(translationLocaleDir)) {
+          localeCount = countFilesByType(translationLocaleDir)
+        } else if (deltaLocaleDir && existsSync(deltaLocaleDir)) {
+          localeCount = countFilesByType(deltaLocaleDir)
+        }
+        
+        if (localeCount.total >= fileCount.total) {
+          completedLocales++
         }
       }
+      
       translationProgress = {
         completed: completedLocales,
         total: targetLocales.length,
-        percentage: Math.round((completedLocales / targetLocales.length) * 100),
+        percentage: targetLocales.length > 0 ? Math.round((completedLocales / targetLocales.length) * 100) : 0,
       }
     }
 
@@ -211,11 +232,60 @@ export function getUploadInfo(senderId: string): Upload | null {
       status = 'batched'
     }
 
+    // Build pipeline steps for change sessions
+    let pipelineStatus: any = undefined
+    let steps: any = undefined
+    let commit: any = undefined
+    let changeCount: any = undefined
+    let automationMode: any = undefined
+    let hasErrors = false
+    let errorCount = 0
+    
+    if (sessionType === 'change-session' && changeMetadata) {
+      pipelineStatus = changeMetadata.status
+      commit = changeMetadata.commit
+      automationMode = changeMetadata.automationMode
+      hasErrors = changeMetadata.errors && changeMetadata.errors.length > 0
+      errorCount = changeMetadata.errors ? changeMetadata.errors.length : 0
+      
+      // Convert ChangeSessionSteps to PipelineSteps
+      if (changeMetadata.steps) {
+        steps = {
+          uploaded: changeMetadata.steps.uploaded,
+          batchCreated: changeMetadata.steps.batchCreated,
+          submitted: changeMetadata.steps.submitted,
+          processing: changeMetadata.steps.processing,
+          outputReceived: changeMetadata.steps.completed ? {
+            completed: changeMetadata.steps.completed.completed,
+            timestamp: changeMetadata.steps.completed.timestamp,
+            error: changeMetadata.steps.completed.error
+          } : { completed: false },
+          translationsProcessed: changeMetadata.steps.completed,
+          prCreated: changeMetadata.steps.prCreated
+        }
+      }
+      
+      // Calculate change count from changes array
+      if (changeMetadata.changes && Array.isArray(changeMetadata.changes)) {
+        const added = changeMetadata.changes.filter((c: any) => c.changeType === 'added').length
+        const modified = changeMetadata.changes.filter((c: any) => c.changeType === 'modified').length
+        const deleted = changeMetadata.changes.filter((c: any) => c.changeType === 'deleted').length
+        
+        changeCount = {
+          added,
+          modified,
+          deleted,
+          total: added + modified + deleted
+        }
+      }
+    }
+
     // Get timestamps
     const stats = statSync(senderDir)
 
     return {
       senderId,
+      sessionType,
       repository: metadata?.repository
         ? { owner: metadata.repository.owner, name: metadata.repository.name }
         : undefined,
@@ -228,6 +298,13 @@ export function getUploadInfo(senderId: string): Upload | null {
       batchIds,
       hasTranslations,
       translationProgress,
+      pipelineStatus,
+      steps,
+      commit,
+      changeCount,
+      automationMode,
+      hasErrors,
+      errorCount
     }
   } catch (error) {
     log.error(`Error getting upload info for ${senderId}:`, error)
@@ -416,7 +493,7 @@ export function listAllBatches(): Batch[] {
 }
 
 /**
- * Get translation status for a sender
+ * Get translation status for a sender (handles both full uploads and change sessions)
  */
 export function getTranslationStatus(senderId: string): TranslationSession | null {
   try {
@@ -425,23 +502,57 @@ export function getTranslationStatus(senderId: string): TranslationSession | nul
       return null
     }
 
-    const metadataPath = join(senderDir, 'metadata.json')
-    const metadata = existsSync(metadataPath)
-      ? (readJsonFile<TranslationMetadataFile>(metadataPath) as TranslationMetadataFile)
-      : null
+    // Check for both regular upload metadata and changes metadata
+    const regularMetadataPath = join(senderDir, 'metadata.json')
+    const changesMetadataPath = join(senderDir, 'changes', 'metadata.json')
+    
+    let metadata: any = null
+    let sessionType: 'full-upload' | 'change-session' = 'full-upload'
+    let translationType: 'full' | 'delta' = 'full'
+    let translationPath = 'translations'
+    
+    if (existsSync(changesMetadataPath)) {
+      metadata = readJsonFile<any>(changesMetadataPath)
+      sessionType = 'change-session'
+      translationType = 'delta'
+      translationPath = 'deltas'
+    } else if (existsSync(regularMetadataPath)) {
+      metadata = readJsonFile<TranslationMetadataFile>(regularMetadataPath)
+    }
 
     const sourceLocale = metadata?.sourceLocale || 'en'
     const targetLocales = metadata?.targetLocales || []
 
     // Get expected file counts from source
-    const uploadsDir = join(senderDir, 'uploads', sourceLocale)
-    const expectedCounts = countFilesByType(uploadsDir)
+    let expectedCounts: FileCount
+    if (sessionType === 'change-session') {
+      const changesOriginalDir = join(senderDir, 'changes', 'original')
+      expectedCounts = { content: 0, global: 0, page: 0, total: 0 }
+      if (existsSync(changesOriginalDir)) {
+        const files = readdirSync(changesOriginalDir, { withFileTypes: true })
+        for (const file of files) {
+          if (file.isFile()) {
+            if (file.name.endsWith('.json')) {
+              expectedCounts.global++
+            } else if (file.name.endsWith('.md') || file.name.endsWith('.mdx')) {
+              expectedCounts.content++
+            } else {
+              expectedCounts.page++
+            }
+            expectedCounts.total++
+          }
+        }
+      }
+    } else {
+      const uploadsDir = join(senderDir, 'uploads', sourceLocale)
+      expectedCounts = countFilesByType(uploadsDir)
+    }
 
     // Get repository name
     const repositoryName = metadata?.repository ? `${metadata.repository.owner}/${metadata.repository.name}` : undefined
 
-    // Check each target locale
-    const translationsDir = join(senderDir, 'translations')
+    // Check each target locale in the appropriate directory
+    const translationsDir = join(senderDir, translationPath)
     const matrix: Record<string, TranslationFileStatus & { percentage: number }> = {}
     let totalCompleted = 0
     let totalMissing = 0
@@ -460,11 +571,11 @@ export function getTranslationStatus(senderId: string): TranslationSession | nul
 
       matrix[locale] = { ...status, percentage }
 
-      if (actualCounts.total === expectedCounts.total) {
+      if (actualCounts.total >= expectedCounts.total) {
         totalCompleted++
       }
 
-      totalMissing += expectedCounts.total - actualCounts.total
+      totalMissing += Math.max(0, expectedCounts.total - actualCounts.total)
     }
 
     const totalExpected = targetLocales.length * expectedCounts.total
@@ -472,6 +583,9 @@ export function getTranslationStatus(senderId: string): TranslationSession | nul
 
     return {
       senderId,
+      sessionType,
+      translationType,
+      translationPath,
       repositoryName,
       sourceLocale,
       targetLocales,
@@ -501,7 +615,7 @@ export function listAllTranslationSessions(): TranslationSession[] {
 }
 
 /**
- * Check if a sender is ready for GitHub PR
+ * Check if a sender is ready for GitHub PR (handles both session types)
  */
 export function isReadyForGitHub(senderId: string): GitHubSession | null {
   try {
@@ -521,11 +635,19 @@ export function isReadyForGitHub(senderId: string): GitHubSession | null {
       return null
     }
 
-    // Get metadata
-    const metadataPath = join(TMP_DIR, senderId, 'metadata.json')
-    const metadata = existsSync(metadataPath)
-      ? (readJsonFile<TranslationMetadataFile>(metadataPath) as TranslationMetadataFile)
-      : null
+    // Get metadata (check both paths)
+    const regularMetadataPath = join(TMP_DIR, senderId, 'metadata.json')
+    const changesMetadataPath = join(TMP_DIR, senderId, 'changes', 'metadata.json')
+    
+    let metadata: any = null
+    let sessionType: 'full-upload' | 'change-session' = 'full-upload'
+    
+    if (existsSync(changesMetadataPath)) {
+      metadata = readJsonFile<any>(changesMetadataPath)
+      sessionType = 'change-session'
+    } else if (existsSync(regularMetadataPath)) {
+      metadata = readJsonFile<TranslationMetadataFile>(regularMetadataPath)
+    }
 
     if (!metadata?.repository) {
       return null
@@ -537,8 +659,27 @@ export function isReadyForGitHub(senderId: string): GitHubSession | null {
       return null
     }
 
+    // Check if PR already exists
+    let hasPullRequest = false
+    let pullRequestNumber: number | undefined
+    let pullRequestUrl: string | undefined
+    
+    if (sessionType === 'change-session' && metadata.steps?.prCreated) {
+      hasPullRequest = metadata.steps.prCreated.completed
+      pullRequestNumber = metadata.steps.prCreated.pullRequestNumber
+      pullRequestUrl = metadata.steps.prCreated.pullRequestUrl
+    }
+
+    // Calculate translation progress
+    const translationProgress = {
+      completed: completedLocales.length,
+      total: translationStatus.targetLocales.length,
+      files: uploadInfo.fileCount.total
+    }
+
     return {
       senderId,
+      sessionType,
       repositoryName: `${metadata.repository.owner}/${metadata.repository.name}`,
       repository: {
         owner: metadata.repository.owner,
@@ -549,9 +690,10 @@ export function isReadyForGitHub(senderId: string): GitHubSession | null {
       availableLocales: translationStatus.targetLocales,
       completedLocales,
       fileCount: uploadInfo.fileCount,
-      hasPullRequest: false, // TODO: Track PR creation status
-      pullRequestNumber: undefined,
-      pullRequestUrl: undefined,
+      hasPullRequest,
+      pullRequestNumber,
+      pullRequestUrl,
+      translationProgress
     }
   } catch (error) {
     log.error(`Error checking GitHub readiness for ${senderId}:`, error)
