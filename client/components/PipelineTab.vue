@@ -202,12 +202,23 @@ const handleResetSession = async (senderId: string, full = false) => {
         />
       </div>
 
+      <Select v-model="filters.sessionType">
+        <SelectTrigger class="w-[180px]">
+          <SelectValue placeholder="All Sessions" />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="all">All Sessions</SelectItem>
+          <SelectItem value="full-upload">Full Uploads</SelectItem>
+          <SelectItem value="change-session">Changes</SelectItem>
+        </SelectContent>
+      </Select>
+
       <Select v-model="filters.status">
         <SelectTrigger class="w-[180px]">
           <SelectValue placeholder="Filter by status" />
         </SelectTrigger>
         <SelectContent>
-          <SelectItem value="all">All</SelectItem>
+          <SelectItem value="all">All Statuses</SelectItem>
           <SelectItem value="uploaded">Uploaded</SelectItem>
           <SelectItem value="batch-created">Batch Created</SelectItem>
           <SelectItem value="submitted">Submitted</SelectItem>

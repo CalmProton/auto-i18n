@@ -99,7 +99,7 @@ import PipelineTab from './PipelineTab.vue'
 import UploadsTab from './UploadsTab.vue'
 import BatchesTab from './BatchesTab.vue'
 import TranslationsTab from './TranslationsTab.vue'
-import GitHubTab from './GitHubTab.vue'
+import GitTab from './GitTab.vue'
 import ToastContainer from './ToastContainer.vue'
 import KeyboardShortcutsHelp from './KeyboardShortcutsHelp.vue'
 
@@ -187,7 +187,7 @@ const currentTabComponent = computed(() => {
     case 'translations':
       return TranslationsTab
     case 'git':
-      return GitHubTab
+      return GitTab
     default:
       return PipelineTab
   }

@@ -16,6 +16,41 @@
       </div>
     </div>
 
+    <!-- Filters -->
+    <div class="flex items-center gap-4">
+      <div class="flex items-center gap-2">
+        <label class="text-sm font-medium">Session Type:</label>
+        <Select v-model="sessionTypeFilter">
+          <SelectTrigger class="w-[180px]">
+            <SelectValue placeholder="All" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Sessions</SelectItem>
+            <SelectItem value="full-upload">Full Uploads</SelectItem>
+            <SelectItem value="change-session">Changes</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
+
+      <div class="flex items-center gap-2">
+        <label class="text-sm font-medium">Translation Type:</label>
+        <Select v-model="translationTypeFilter">
+          <SelectTrigger class="w-[180px]">
+            <SelectValue placeholder="All" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Types</SelectItem>
+            <SelectItem value="full">Full Translations</SelectItem>
+            <SelectItem value="delta">Deltas</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
+
+      <div class="ml-auto text-sm text-muted-foreground">
+        Showing {{ filteredTranslations.length }} of {{ translations.length }} sessions
+      </div>
+    </div>
+
     <!-- Loading State -->
     <div v-if="loading && !translations.length" class="flex items-center justify-center py-12">
       <div class="text-center space-y-4">
@@ -34,33 +69,55 @@
     </Alert>
 
     <!-- Empty State -->
-    <div v-else-if="!translations.length" class="flex items-center justify-center py-12 border-2 border-dashed rounded-lg">
+    <div v-else-if="!filteredTranslations.length" class="flex items-center justify-center py-12 border-2 border-dashed rounded-lg">
       <div class="text-center space-y-4">
         <Languages class="h-12 w-12 mx-auto text-muted-foreground" />
         <div>
-          <p class="text-lg font-medium">No translations yet</p>
+          <p class="text-lg font-medium">{{ translations.length ? 'No translations match filters' : 'No translations yet' }}</p>
           <p class="text-sm text-muted-foreground">
-            Translations will appear here after batch processing
+            {{ translations.length ? 'Try adjusting your filters' : 'Translations will appear here after batch processing' }}
           </p>
         </div>
       </div>
     </div>
 
     <!-- Translations List -->
-    <TranslationsList v-else :translations="translations" @refresh="refresh" />
+    <TranslationsList v-else :translations="filteredTranslations" @refresh="refresh" />
   </div>
 </template>
 
 <script setup lang="ts">
-import { onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useTranslations } from '@/composables'
 import { RefreshCw, AlertCircle, Languages } from 'lucide-vue-next'
 import { Button } from '@/components/ui/button'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Spinner } from '@/components/ui/spinner'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import TranslationsList from './translations/TranslationsList.vue'
 
 const { translations, loading, error, fetchTranslations } = useTranslations()
+
+// Filters
+const sessionTypeFilter = ref<'all' | 'full-upload' | 'change-session'>('all')
+const translationTypeFilter = ref<'all' | 'full' | 'delta'>('all')
+
+// Filtered translations
+const filteredTranslations = computed(() => {
+  return translations.value.filter((translation) => {
+    // Filter by session type
+    if (sessionTypeFilter.value !== 'all' && translation.sessionType !== sessionTypeFilter.value) {
+      return false
+    }
+
+    // Filter by translation type
+    if (translationTypeFilter.value !== 'all' && translation.translationType !== translationTypeFilter.value) {
+      return false
+    }
+
+    return true
+  })
+})
 
 onMounted(() => {
   fetchTranslations()
