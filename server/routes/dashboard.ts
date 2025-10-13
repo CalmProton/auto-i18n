@@ -15,6 +15,7 @@ import {
   getTranslationStatus,
   listReadyForGitHub,
   getSystemStats,
+  getDashboardOverview,
   deleteUploadSession,
   deleteBatch,
   listFiles,
@@ -90,12 +91,30 @@ dashboardRoutes.get('/uploads/:senderId', async ({ params }) => {
       return { error: 'Upload not found' }
     }
 
-    // Get files for each type
-    const uploadsDir = join(TMP_DIR, senderId, 'uploads', uploadInfo.sourceLocale)
-    const files: Record<string, Array<{ name: string; size: number; path: string }>> = {
-      content: listFiles(join(uploadsDir, 'content')),
-      global: listFiles(join(uploadsDir, 'global')),
-      page: listFiles(join(uploadsDir, 'page')),
+    // Determine if this is a change session or regular upload
+    const changesOriginalDir = join(TMP_DIR, senderId, 'changes', 'original')
+    const isChangeSession = existsSync(changesOriginalDir)
+    
+    let files: Record<string, Array<{ name: string; size: number; path: string }>>
+    
+    if (isChangeSession) {
+      // For changes, files are directly in changes/original/
+      const allFiles = listFiles(changesOriginalDir)
+      
+      // Categorize files based on extension
+      files = {
+        content: allFiles.filter(f => f.name.endsWith('.md') || f.name.endsWith('.mdx')),
+        global: allFiles.filter(f => f.name.endsWith('.json')),
+        page: allFiles.filter(f => !f.name.endsWith('.json') && !f.name.endsWith('.md') && !f.name.endsWith('.mdx')),
+      }
+    } else {
+      // For regular uploads, files are organized by type in uploads/{locale}/
+      const uploadsDir = join(TMP_DIR, senderId, 'uploads', uploadInfo.sourceLocale)
+      files = {
+        content: listFiles(join(uploadsDir, 'content')),
+        global: listFiles(join(uploadsDir, 'global')),
+        page: listFiles(join(uploadsDir, 'page')),
+      }
     }
 
     // Get associated batches
@@ -533,6 +552,20 @@ dashboardRoutes.get('/github/status/:senderId', async ({ params }) => {
 })
 
 // ==================== SYSTEM ====================
+
+/**
+ * GET /api/stats
+ * Get dashboard overview statistics
+ */
+dashboardRoutes.get('/stats', async () => {
+  try {
+    const stats = getDashboardOverview()
+    return stats
+  } catch (error) {
+    log.error('Error getting dashboard overview:', error)
+    return { error: 'Failed to get dashboard overview' }
+  }
+})
 
 /**
  * GET /api/system/stats

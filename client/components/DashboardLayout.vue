@@ -87,7 +87,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { useAuth, useKeyboardShortcuts } from '@/composables'
 import { Languages, Upload, Timer, Github, Keyboard, LogOut, GitBranch } from 'lucide-vue-next'
 import { Button } from '@/components/ui/button'
@@ -106,6 +106,37 @@ import KeyboardShortcutsHelp from './KeyboardShortcutsHelp.vue'
 const { isAuthenticated, logout } = useAuth()
 const activeTab = ref('uploads')
 const helpModal = ref<InstanceType<typeof KeyboardShortcutsHelp> | null>(null)
+
+// Valid tab names
+const validTabs = ['uploads', 'batches', 'changes', 'translations', 'github'] as const
+type TabName = typeof validTabs[number]
+
+// Initialize tab from URL on mount
+onMounted(() => {
+  const params = new URLSearchParams(window.location.search)
+  const tabFromUrl = params.get('tab')
+  if (tabFromUrl && validTabs.includes(tabFromUrl as TabName)) {
+    activeTab.value = tabFromUrl
+  }
+})
+
+// Update URL when tab changes
+watch(activeTab, (newTab) => {
+  const url = new URL(window.location.href)
+  url.searchParams.set('tab', newTab)
+  window.history.pushState({}, '', url.toString())
+})
+
+// Listen to browser back/forward buttons
+window.addEventListener('popstate', () => {
+  const params = new URLSearchParams(window.location.search)
+  const tabFromUrl = params.get('tab')
+  if (tabFromUrl && validTabs.includes(tabFromUrl as TabName)) {
+    activeTab.value = tabFromUrl
+  } else {
+    activeTab.value = 'uploads'
+  }
+})
 
 function showHelp() {
   helpModal.value?.open()

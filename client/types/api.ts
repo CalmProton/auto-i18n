@@ -10,11 +10,9 @@ export type TranslationProvider = 'openai' | 'anthropic' | 'deepseek'
 
 export interface DashboardOverview {
   totalUploads: number
-  activeBatches: number
   completedBatches: number
   failedBatches: number
   totalTranslations: number
-  pendingTranslations: number
   readyForPR: number
 }
 

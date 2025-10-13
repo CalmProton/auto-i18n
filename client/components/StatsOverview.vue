@@ -23,34 +23,7 @@
             <Upload class="h-4 w-4" />
             Total Uploads
           </p>
-          <p class="text-3xl font-bold">{{ stats?.totalUploads ?? 0 }}</p>
-        </div>
-        
-        <!-- Active Batches -->
-        <div class="space-y-2">
-          <p class="text-sm font-medium text-muted-foreground flex items-center gap-2">
-            <Timer class="h-4 w-4" />
-            Active Batches
-          </p>
-          <p class="text-3xl font-bold text-blue-600">{{ stats?.activeBatches ?? 0 }}</p>
-        </div>
-        
-        <!-- Completed Batches -->
-        <div class="space-y-2">
-          <p class="text-sm font-medium text-muted-foreground flex items-center gap-2">
-            <CheckCircle class="h-4 w-4" />
-            Completed Batches
-          </p>
-          <p class="text-3xl font-bold text-green-600">{{ stats?.completedBatches ?? 0 }}</p>
-        </div>
-        
-        <!-- Failed Batches -->
-        <div class="space-y-2">
-          <p class="text-sm font-medium text-muted-foreground flex items-center gap-2">
-            <XCircle class="h-4 w-4" />
-            Failed Batches
-          </p>
-          <p class="text-3xl font-bold text-red-600">{{ stats?.failedBatches ?? 0 }}</p>
+          <p class="text-3xl font-bold text-foreground">{{ stats?.totalUploads ?? 0 }}</p>
         </div>
         
         <!-- Total Translations -->
@@ -59,16 +32,25 @@
             <Languages class="h-4 w-4" />
             Total Translations
           </p>
-          <p class="text-3xl font-bold">{{ stats?.totalTranslations ?? 0 }}</p>
+          <p class="text-3xl font-bold text-foreground">{{ stats?.totalTranslations ?? 0 }}</p>
         </div>
         
-        <!-- Pending Translations -->
+        <!-- Completed Batches -->
         <div class="space-y-2">
           <p class="text-sm font-medium text-muted-foreground flex items-center gap-2">
-            <Clock class="h-4 w-4" />
-            Pending
+            <CheckCircle class="h-4 w-4" />
+            Completed Batches
           </p>
-          <p class="text-3xl font-bold text-orange-600">{{ stats?.pendingTranslations ?? 0 }}</p>
+          <p class="text-3xl font-bold text-foreground">{{ stats?.completedBatches ?? 0 }}</p>
+        </div>
+        
+        <!-- Failed Batches -->
+        <div class="space-y-2">
+          <p class="text-sm font-medium text-muted-foreground flex items-center gap-2">
+            <XCircle class="h-4 w-4" />
+            Failed Batches
+          </p>
+          <p class="text-3xl font-bold text-foreground">{{ stats?.failedBatches ?? 0 }}</p>
         </div>
         
         <!-- Ready for PR -->
@@ -77,19 +59,7 @@
             <GitPullRequest class="h-4 w-4" />
             Ready for PR
           </p>
-          <p class="text-3xl font-bold text-purple-600">{{ stats?.readyForPR ?? 0 }}</p>
-        </div>
-        
-        <!-- System Status -->
-        <div class="space-y-2">
-          <p class="text-sm font-medium text-muted-foreground flex items-center gap-2">
-            <Activity class="h-4 w-4" />
-            System Status
-          </p>
-          <Badge variant="default" class="bg-green-600">
-            <CircleDot class="h-3 w-3 mr-1" />
-            Operational
-          </Badge>
+          <p class="text-3xl font-bold text-foreground">{{ stats?.readyForPR ?? 0 }}</p>
         </div>
       </div>
       
@@ -109,20 +79,15 @@ import { onMounted } from 'vue'
 import { useSystem } from '@/composables'
 import {
   Upload,
-  Timer,
   CheckCircle,
   XCircle,
   Languages,
-  Clock,
   GitPullRequest,
-  Activity,
-  CircleDot,
   RefreshCw,
   AlertCircle
 } from 'lucide-vue-next'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
-import { Badge } from '@/components/ui/badge'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Spinner } from '@/components/ui/spinner'
 

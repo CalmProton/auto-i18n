@@ -76,8 +76,9 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted } from 'vue'
-import { useUploads } from '@/composables'
+import { ref, computed, watch } from 'vue'
+import { api } from '@/lib/api-client'
+import type { UploadDetailResponse } from '@/types/api'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import Icon from '../Icon.vue'
 
@@ -85,11 +86,33 @@ const props = defineProps<{
   senderId: string
 }>()
 
-const { currentUpload: uploadDetail, loading, error, fetchUploadDetail } = useUploads()
+// Local state for this component instance
+const uploadDetail = ref<UploadDetailResponse | null>(null)
+const loading = ref(false)
+const error = ref<string | null>(null)
 
-onMounted(() => {
-  fetchUploadDetail(props.senderId)
-})
+async function fetchUploadDetail(senderId: string) {
+  loading.value = true
+  error.value = null
+  
+  try {
+    const response = await api.get<UploadDetailResponse>(`/api/uploads/${senderId}`)
+    uploadDetail.value = response
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Failed to fetch upload details'
+    error.value = message
+    console.error('Failed to fetch upload detail:', err)
+  } finally {
+    loading.value = false
+  }
+}
+
+// Watch for senderId changes and fetch details
+watch(() => props.senderId, (newSenderId) => {
+  if (newSenderId) {
+    fetchUploadDetail(newSenderId)
+  }
+}, { immediate: true })
 
 const hasAnyFiles = computed(() => {
   if (!uploadDetail.value?.files) return false

@@ -23,7 +23,7 @@ export function useSystem() {
     error.value = null
 
     try {
-      const response = await api.get<DashboardOverview>('/api/system/stats')
+      const response = await api.get<DashboardOverview>('/api/stats')
       stats.value = response
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to fetch dashboard stats'

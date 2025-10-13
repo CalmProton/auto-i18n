@@ -116,17 +116,55 @@ export function getUploadInfo(senderId: string): Upload | null {
       return null
     }
 
-    const metadataPath = join(senderDir, 'metadata.json')
-    const metadata = existsSync(metadataPath)
-      ? (readJsonFile<TranslationMetadataFile>(metadataPath) as TranslationMetadataFile)
-      : null
+    // Check for both regular upload metadata and changes metadata
+    const regularMetadataPath = join(senderDir, 'metadata.json')
+    const changesMetadataPath = join(senderDir, 'changes', 'metadata.json')
+    
+    let metadata: TranslationMetadataFile | null = null
+    let isChangeSession = false
+    
+    if (existsSync(changesMetadataPath)) {
+      metadata = readJsonFile<TranslationMetadataFile>(changesMetadataPath)
+      isChangeSession = true
+    } else if (existsSync(regularMetadataPath)) {
+      metadata = readJsonFile<TranslationMetadataFile>(regularMetadataPath)
+    }
 
-    const uploadsDir = join(senderDir, 'uploads')
     const sourceLocale = metadata?.sourceLocale || 'en'
-    const sourceDir = join(uploadsDir, sourceLocale)
-
-    // Count files
-    const fileCount = countFilesByType(sourceDir)
+    
+    // Determine the source directory based on session type
+    let sourceDir: string
+    let fileCount: FileCount
+    
+    if (isChangeSession) {
+      // For changes, files are in changes/original/
+      const changesOriginalDir = join(senderDir, 'changes', 'original')
+      
+      // Count files directly in the original directory (changes are typically global.json files)
+      fileCount = { content: 0, global: 0, page: 0, total: 0 }
+      if (existsSync(changesOriginalDir)) {
+        const files = readdirSync(changesOriginalDir, { withFileTypes: true })
+        for (const file of files) {
+          if (file.isFile()) {
+            // Determine file type based on name/extension
+            if (file.name.endsWith('.json')) {
+              fileCount.global++
+            } else if (file.name.endsWith('.md') || file.name.endsWith('.mdx')) {
+              fileCount.content++
+            } else {
+              fileCount.page++
+            }
+            fileCount.total++
+          }
+        }
+      }
+      sourceDir = changesOriginalDir
+    } else {
+      // For regular uploads, files are in uploads/{locale}/
+      const uploadsDir = join(senderDir, 'uploads')
+      sourceDir = join(uploadsDir, sourceLocale)
+      fileCount = countFilesByType(sourceDir)
+    }
 
     // Get target locales
     const targetLocales = metadata?.targetLocales || []
@@ -597,6 +635,56 @@ export function getSystemStats(): SystemStats {
       configured: githubConfigured,
       apiUrl: githubApiUrl,
     },
+  }
+}
+
+/**
+ * Get dashboard overview statistics
+ */
+export function getDashboardOverview() {
+  const uploads = listAllUploads()
+  const batches = listAllBatches()
+
+  // Count total uploaded files across all uploads
+  let totalUploadedFiles = 0
+  for (const upload of uploads) {
+    totalUploadedFiles += upload.fileCount.total
+  }
+
+  // Count total translation files across all sessions
+  let totalTranslationFiles = 0
+  for (const senderId of listAllSenderIds()) {
+    const translationsDir = join(TMP_DIR, senderId, 'translations')
+    if (existsSync(translationsDir)) {
+      const locales = readdirSync(translationsDir, { withFileTypes: true })
+        .filter((d) => d.isDirectory())
+        .map((d) => d.name)
+      
+      for (const locale of locales) {
+        const localeDir = join(translationsDir, locale)
+        const count = countFilesByType(localeDir)
+        totalTranslationFiles += count.total
+      }
+    }
+  }
+
+  // Count completed batches (have output files)
+  const completedBatches = batches.filter(
+    (b) => b.status === 'completed' && b.hasOutput
+  ).length
+
+  // Count failed batches (have error files)
+  const failedBatches = batches.filter((b) => b.hasErrors).length
+
+  // Count sessions ready for PR
+  const readySessions = listReadyForGitHub().length
+
+  return {
+    totalUploads: totalUploadedFiles,
+    completedBatches,
+    failedBatches,
+    totalTranslations: totalTranslationFiles,
+    readyForPR: readySessions,
   }
 }
 
