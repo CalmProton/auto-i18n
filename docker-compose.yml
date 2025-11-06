@@ -1,0 +1,114 @@
+version: '3.8'
+
+services:
+  # PostgreSQL - Persistent storage for sessions, metadata, and translations
+  postgres:
+    image: postgres:18-alpine
+    container_name: auto-i18n-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-auto_i18n}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
+      POSTGRES_DB: ${POSTGRES_DB:-auto_i18n}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./server/database/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-auto_i18n}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # DragonflyDB - Redis-compatible cache for temporary data, batch processing, and queues
+  dragonfly:
+    image: docker.dragonflydb.io/dragonflydb/dragonfly:latest
+    container_name: auto-i18n-dragonfly
+    restart: unless-stopped
+    ulimits:
+      memlock: -1
+    ports:
+      - "${DRAGONFLY_PORT:-6379}:6379"
+    volumes:
+      - dragonfly_data:/data
+    command: >
+      --requirepass ${DRAGONFLY_PASSWORD:-changeme}
+      --maxmemory 2gb
+      --cache_mode true
+    healthcheck:
+      test: ["CMD", "redis-cli", "--raw", "incr", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Auto-i18n Application
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: auto-i18n-app
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      dragonfly:
+        condition: service_healthy
+    ports:
+      - "${PORT:-3000}:3000"
+      - "${CLIENT_PORT:-5173}:5173"
+    environment:
+      # Server configuration
+      PORT: ${PORT:-3000}
+      NODE_ENV: ${NODE_ENV:-production}
+      
+      # Database configuration
+      DATABASE_URL: postgresql://${POSTGRES_USER:-auto_i18n}:${POSTGRES_PASSWORD:-changeme}@postgres:5432/${POSTGRES_DB:-auto_i18n}
+      
+      # Cache configuration
+      REDIS_URL: redis://:${DRAGONFLY_PASSWORD:-changeme}@dragonfly:6379
+      
+      # Authentication
+      ACCESS_KEY: ${ACCESS_KEY}
+      
+      # Translation providers
+      TRANSLATION_PROVIDER: ${TRANSLATION_PROVIDER:-openai}
+      
+      # OpenAI
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4o-mini}
+      OPENAI_API_URL: ${OPENAI_API_URL}
+      
+      # Anthropic
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+      ANTHROPIC_MODEL: ${ANTHROPIC_MODEL:-claude-3-5-haiku-20241022}
+      ANTHROPIC_API_URL: ${ANTHROPIC_API_URL}
+      
+      # DeepSeek
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY}
+      DEEPSEEK_MODEL: ${DEEPSEEK_MODEL:-deepseek-chat}
+      DEEPSEEK_API_URL: ${DEEPSEEK_API_URL}
+      
+      # GitHub integration
+      AUTO_I18N_GITHUB_TOKEN: ${AUTO_I18N_GITHUB_TOKEN}
+      GITHUB_TOKEN: ${GITHUB_TOKEN}
+      AUTO_I18N_GITHUB_API_URL: ${AUTO_I18N_GITHUB_API_URL}
+      AUTO_I18N_GITHUB_APP_NAME: ${AUTO_I18N_GITHUB_APP_NAME}
+    volumes:
+      # Mount logs directory for persistent logging
+      - ./tmp/logs:/app/tmp/logs
+      # Optional: Mount for development hot-reload
+      # - .:/app
+      # - /app/node_modules
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+volumes:
+  postgres_data:
+    driver: local
+  dragonfly_data:
+    driver: local
