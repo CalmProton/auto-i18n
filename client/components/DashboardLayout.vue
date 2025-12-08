@@ -15,6 +15,19 @@
           </div>
           
           <div class="flex items-center gap-2">
+            <!-- Mock Mode Indicator -->
+            <Tooltip v-if="mockModeActive">
+              <TooltipTrigger asChild>
+                <Badge variant="outline" class="gap-1 text-yellow-600 border-yellow-600 bg-yellow-50 dark:bg-yellow-950">
+                  <TestTube class="h-3 w-3" />
+                  Mock Mode
+                </Badge>
+              </TooltipTrigger>
+              <TooltipContent>
+                <p>Translations use placeholders instead of AI models</p>
+              </TooltipContent>
+            </Tooltip>
+            
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button 
@@ -88,12 +101,13 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, watch } from 'vue'
-import { useAuth, useKeyboardShortcuts } from '@/composables'
-import { Languages, Upload, Timer, GitBranch, Keyboard, LogOut, Workflow } from 'lucide-vue-next'
+import { useAuth, useKeyboardShortcuts, usePipelineEvents } from '@/composables'
+import { Languages, Upload, Timer, GitBranch, Keyboard, LogOut, Workflow, TestTube } from 'lucide-vue-next'
 import { Button } from '@/components/ui/button'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { Kbd } from '@/components/ui/kbd'
+import { Badge } from '@/components/ui/badge'
 import StatsOverview from './StatsOverview.vue'
 import PipelineTab from './PipelineTab.vue'
 import UploadsTab from './UploadsTab.vue'
@@ -104,6 +118,7 @@ import ToastContainer from './ToastContainer.vue'
 import KeyboardShortcutsHelp from './KeyboardShortcutsHelp.vue'
 
 const { isAuthenticated, logout } = useAuth()
+const { translationMode, mockModeActive, fetchTranslationMode } = usePipelineEvents()
 const activeTab = ref('pipeline')
 const helpModal = ref<InstanceType<typeof KeyboardShortcutsHelp> | null>(null)
 
@@ -118,6 +133,8 @@ onMounted(() => {
   if (tabFromUrl && validTabs.includes(tabFromUrl as TabName)) {
     activeTab.value = tabFromUrl
   }
+  // Fetch translation mode on mount
+  fetchTranslationMode()
 })
 
 // Update URL when tab changes

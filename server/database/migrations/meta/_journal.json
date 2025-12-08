@@ -8,6 +8,13 @@
       "when": 1765219422699,
       "tag": "0000_dizzy_greymalkin",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1765229299383,
+      "tag": "0001_bouncy_scourge",
+      "breakpoints": true
     }
   ]
 }

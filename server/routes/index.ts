@@ -6,6 +6,8 @@ import githubRoutes from './github'
 import batchRoutes from './batch'
 import dashboardRoutes from './dashboard'
 import changesRoutes from './changes'
+import { pipelineRoutes } from './pipeline'
+import { sseRoutes } from './sse'
 
 const routes = new Elysia()
 
@@ -17,5 +19,7 @@ routes.use(batchRoutes)
 routes.use(githubRoutes)
 routes.use(dashboardRoutes)
 routes.use(changesRoutes)
+routes.use(pipelineRoutes)
+routes.use(sseRoutes)
 
 export default routes

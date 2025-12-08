@@ -2,7 +2,7 @@ import { existsSync, readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { createScopedLogger } from '../utils/logger'
 
-export type TranslationProvider = 'openai' | 'anthropic' | 'deepseek'
+export type TranslationProvider = 'openai' | 'anthropic' | 'deepseek' | 'mock'
 
 export type ProviderConfig = {
   apiKey: string
@@ -85,6 +85,9 @@ function ensureEnvLoaded(): void {
 
 function toTranslationProvider(value: string | undefined): TranslationProvider {
   const normalized = (value ?? '').trim().toLowerCase()
+  if (normalized === 'mock') {
+    return 'mock'
+  }
   if (normalized === 'anthropic') {
     return 'anthropic'
   }
@@ -92,6 +95,19 @@ function toTranslationProvider(value: string | undefined): TranslationProvider {
     return 'deepseek'
   }
   return 'openai'
+}
+
+/**
+ * Check if mock translation mode is enabled globally.
+ * This can be set via MOCK_TRANSLATIONS=true env var or TRANSLATION_PROVIDER=mock
+ */
+export function isMockModeEnabled(): boolean {
+  ensureEnvLoaded()
+  const mockEnv = readEnv('MOCK_TRANSLATIONS')
+  if (mockEnv?.toLowerCase() === 'true' || mockEnv === '1') {
+    return true
+  }
+  return toTranslationProvider(readEnv('TRANSLATION_PROVIDER')) === 'mock'
 }
 
 function readEnv(name: string): string | undefined {
@@ -124,6 +140,16 @@ function readProviderConfig(keyEnv: string, modelEnv: string, urlEnv?: string): 
 
 export function loadTranslationConfig(): TranslationConfig {
   const provider = toTranslationProvider(readEnv('TRANSLATION_PROVIDER'))
+
+  // Mock provider doesn't need any configuration
+  if (provider === 'mock') {
+    log.info('Mock translation provider enabled - no API calls will be made')
+    return {
+      provider: 'mock',
+      providerConfig: { apiKey: 'mock' },
+      providers: {}
+    }
+  }
 
   const openaiConfig = readProviderConfig('OPENAI_API_KEY', 'OPENAI_MODEL', 'OPENAI_API_URL')
   const anthropicConfig = readProviderConfig('ANTHROPIC_API_KEY', 'ANTHROPIC_MODEL', 'ANTHROPIC_API_URL')

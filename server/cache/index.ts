@@ -17,6 +17,9 @@ import { createScopedLogger } from '../utils/logger'
 
 const log = createScopedLogger('cache')
 
+// Re-export publish and subscribe for use in other modules
+export { publish, subscribe, type MessageHandler }
+
 // ============================================================================
 // CACHE KEY PATTERNS
 // ============================================================================

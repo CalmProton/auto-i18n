@@ -47,6 +47,22 @@ export type OpenAIBatchStatus = (typeof openAIBatchStatusValues)[number]
 export const batchRequestStatusValues = ['pending', 'completed', 'failed'] as const
 export type BatchRequestStatus = (typeof batchRequestStatusValues)[number]
 
+export const pipelineStepValues = [
+  'upload',
+  'batch-create',
+  'batch-submit',
+  'batch-poll',
+  'batch-process',
+  'translate',
+  'github-finalize',
+  'github-pr',
+  'cleanup'
+] as const
+export type PipelineStep = (typeof pipelineStepValues)[number]
+
+export const pipelineEventStatusValues = ['started', 'in-progress', 'completed', 'failed', 'cancelled', 'retrying'] as const
+export type PipelineEventStatus = (typeof pipelineEventStatusValues)[number]
+
 // ============================================================================
 // SESSIONS TABLE
 // ============================================================================
@@ -293,6 +309,84 @@ export const translationStats = pgTable('translation_stats', {
 ])
 
 // ============================================================================
+// PIPELINE_EVENTS TABLE - Tracks pipeline step execution for debugging/visibility
+// ============================================================================
+
+export const pipelineEvents = pgTable('pipeline_events', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  sessionId: uuid('session_id').notNull().references(() => sessions.id, { onDelete: 'cascade' }),
+
+  // Step identification
+  step: varchar('step', { length: 50 }).notNull().$type<PipelineStep>(),
+  status: varchar('status', { length: 50 }).notNull().$type<PipelineEventStatus>(),
+
+  // Event details
+  message: text('message'),
+  durationMs: integer('duration_ms'),
+
+  // Request/Response data for debugging (can be large)
+  requestData: jsonb('request_data').$type<Record<string, unknown>>(),
+  responseData: jsonb('response_data').$type<Record<string, unknown>>(),
+  errorData: jsonb('error_data').$type<{ message: string; stack?: string; code?: string }>(),
+
+  // Context
+  batchId: varchar('batch_id', { length: 255 }),
+  jobId: varchar('job_id', { length: 255 }),
+
+  // Timestamps
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  index('idx_pipeline_events_session').on(table.sessionId),
+  index('idx_pipeline_events_step').on(table.step),
+  index('idx_pipeline_events_status').on(table.status),
+  index('idx_pipeline_events_created').on(table.createdAt),
+])
+
+// ============================================================================
+// API_REQUEST_LOGS TABLE - Stores all API requests for inspection
+// ============================================================================
+
+export const apiRequestLogs = pgTable('api_request_logs', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  sessionId: uuid('session_id').references(() => sessions.id, { onDelete: 'cascade' }),
+
+  // Request identification
+  provider: varchar('provider', { length: 50 }).notNull(),
+  endpoint: varchar('endpoint', { length: 255 }).notNull(),
+  method: varchar('method', { length: 10 }).notNull().default('POST'),
+
+  // Request details
+  requestHeaders: jsonb('request_headers').$type<Record<string, string>>(),
+  requestBody: jsonb('request_body').$type<Record<string, unknown>>(),
+
+  // Response details
+  responseStatus: integer('response_status'),
+  responseHeaders: jsonb('response_headers').$type<Record<string, string>>(),
+  responseBody: jsonb('response_body').$type<Record<string, unknown>>(),
+
+  // Error details
+  errorMessage: text('error_message'),
+  errorStack: text('error_stack'),
+
+  // Timing
+  durationMs: integer('duration_ms'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+
+  // Context
+  filePath: text('file_path'),
+  sourceLocale: varchar('source_locale', { length: 10 }),
+  targetLocale: varchar('target_locale', { length: 10 }),
+
+  // Mock mode indicator
+  isMock: varchar('is_mock', { length: 5 }).default('false'),
+}, (table) => [
+  index('idx_api_logs_session').on(table.sessionId),
+  index('idx_api_logs_provider').on(table.provider),
+  index('idx_api_logs_created').on(table.createdAt),
+  index('idx_api_logs_status').on(table.responseStatus),
+])
+
+// ============================================================================
 // RELATIONS
 // ============================================================================
 
@@ -301,6 +395,8 @@ export const sessionsRelations = relations(sessions, ({ many }) => ({
   files: many(files),
   batches: many(batches),
   translationStats: many(translationStats),
+  pipelineEvents: many(pipelineEvents),
+  apiRequestLogs: many(apiRequestLogs),
 }))
 
 export const translationJobsRelations = relations(translationJobs, ({ one, many }) => ({
@@ -348,6 +444,20 @@ export const translationStatsRelations = relations(translationStats, ({ one }) =
   }),
 }))
 
+export const pipelineEventsRelations = relations(pipelineEvents, ({ one }) => ({
+  session: one(sessions, {
+    fields: [pipelineEvents.sessionId],
+    references: [sessions.id],
+  }),
+}))
+
+export const apiRequestLogsRelations = relations(apiRequestLogs, ({ one }) => ({
+  session: one(sessions, {
+    fields: [apiRequestLogs.sessionId],
+    references: [sessions.id],
+  }),
+}))
+
 // ============================================================================
 // TYPE EXPORTS (inferred from tables)
 // ============================================================================
@@ -369,3 +479,9 @@ export type NewBatchRequest = typeof batchRequests.$inferInsert
 
 export type TranslationStat = typeof translationStats.$inferSelect
 export type NewTranslationStat = typeof translationStats.$inferInsert
+
+export type PipelineEvent = typeof pipelineEvents.$inferSelect
+export type NewPipelineEvent = typeof pipelineEvents.$inferInsert
+
+export type ApiRequestLog = typeof apiRequestLogs.$inferSelect
+export type NewApiRequestLog = typeof apiRequestLogs.$inferInsert
