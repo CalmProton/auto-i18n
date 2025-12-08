@@ -4,8 +4,10 @@ import type { ChangeSession } from '../../types/api'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../ui/card'
 import { Badge } from '../ui/badge'
 import { Button } from '../ui/button'
-import { GitBranch, GitCommit, Play, CheckCircle, Trash2, ExternalLink, AlertCircle, RefreshCw } from 'lucide-vue-next'
+import { GitBranch, GitCommit, Play, CheckCircle, Trash2, ExternalLink, AlertCircle, RefreshCw, Activity } from 'lucide-vue-next'
 import ChangesStepper from './ChangesStepper.vue'
+import PipelineEventsPanel from '../PipelineEventsPanel.vue'
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../ui/dialog'
 import { useToast } from '../../composables'
 
 interface Props {
@@ -28,6 +30,7 @@ const processing = ref(false)
 const deleting = ref(false)
 const showAllErrors = ref(false)
 const retrying = ref<string | null>(null)
+const showPipelineEvents = ref(false)
 
 const showToast = (options: { title: string; description: string; variant?: 'default' | 'destructive' }) => {
   if (options.variant === 'destructive') {
@@ -187,6 +190,15 @@ const handleResetSession = async (full = false) => {
         </div>
 
         <div class="flex items-center gap-2">
+          <Button
+            size="sm"
+            variant="ghost"
+            @click="showPipelineEvents = true"
+            title="View Pipeline Events"
+          >
+            <Activity class="h-4 w-4" />
+          </Button>
+
           <Button
             v-if="session.status === 'uploaded' && session.automationMode === 'manual'"
             size="sm"
@@ -371,5 +383,21 @@ const handleResetSession = async (full = false) => {
         </div>
       </div>
     </CardContent>
+    
+    <!-- Pipeline Events Dialog -->
+    <Dialog v-model:open="showPipelineEvents">
+      <DialogContent class="max-w-4xl max-h-[90vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle class="flex items-center gap-2">
+            <Activity class="h-5 w-5" />
+            Pipeline Events - {{ session.repositoryName }}
+          </DialogTitle>
+        </DialogHeader>
+        <PipelineEventsPanel 
+          :sender-id="session.sessionId" 
+          @close="showPipelineEvents = false" 
+        />
+      </DialogContent>
+    </Dialog>
   </Card>
 </template>

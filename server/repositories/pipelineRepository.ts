@@ -169,6 +169,40 @@ export async function getPipelineEventsBySenderId(
 }
 
 /**
+ * Get a single pipeline event by ID
+ */
+export async function getPipelineEventById(
+  eventId: string
+): Promise<PipelineEvent | null> {
+  const db = getDatabase()
+
+  const [event] = await db
+    .select()
+    .from(pipelineEvents)
+    .where(eq(pipelineEvents.id, eventId))
+    .limit(1)
+
+  return event || null
+}
+
+/**
+ * Count pipeline events for a session by senderId
+ */
+export async function countPipelineEventsBySenderId(
+  senderId: string
+): Promise<number> {
+  const db = getDatabase()
+
+  const [result] = await db
+    .select({ count: sql<number>`count(*)` })
+    .from(pipelineEvents)
+    .innerJoin(sessions, eq(sessions.id, pipelineEvents.sessionId))
+    .where(eq(sessions.senderId, senderId))
+
+  return Number(result?.count ?? 0)
+}
+
+/**
  * Get latest event for each step in a session
  */
 export async function getLatestEventsByStep(
@@ -344,6 +378,40 @@ export async function getApiRequestLogsBySenderId(
 }
 
 /**
+ * Get a single API request log by ID
+ */
+export async function getApiRequestLogById(
+  logId: string
+): Promise<ApiRequestLog | null> {
+  const db = getDatabase()
+
+  const [log] = await db
+    .select()
+    .from(apiRequestLogs)
+    .where(eq(apiRequestLogs.id, logId))
+    .limit(1)
+
+  return log || null
+}
+
+/**
+ * Count API request logs for a session by senderId
+ */
+export async function countApiRequestLogsBySenderId(
+  senderId: string
+): Promise<number> {
+  const db = getDatabase()
+
+  const [result] = await db
+    .select({ count: sql<number>`count(*)` })
+    .from(apiRequestLogs)
+    .innerJoin(sessions, eq(sessions.id, apiRequestLogs.sessionId))
+    .where(eq(sessions.senderId, senderId))
+
+  return Number(result?.count ?? 0)
+}
+
+/**
  * Delete API request logs for a session
  */
 export async function deleteApiRequestLogsBySession(
@@ -408,6 +476,51 @@ export async function getPipelineLogCounts(sessionId: string): Promise<{
   return {
     pipelineEvents: Number(eventCount?.count ?? 0),
     apiRequestLogs: Number(logCount?.count ?? 0),
+  }
+}
+
+/**
+ * Get counts for pipeline data by senderId
+ */
+export async function getPipelineStatsBySenderId(senderId: string): Promise<{
+  pipelineEvents: number
+  apiRequestLogs: number
+  batches: number
+}> {
+  const db = getDatabase()
+
+  // Get session ID first
+  const [session] = await db
+    .select({ id: sessions.id })
+    .from(sessions)
+    .where(eq(sessions.senderId, senderId))
+    .limit(1)
+
+  if (!session) {
+    return { pipelineEvents: 0, apiRequestLogs: 0, batches: 0 }
+  }
+
+  const [eventCount] = await db
+    .select({ count: sql<number>`count(*)` })
+    .from(pipelineEvents)
+    .where(eq(pipelineEvents.sessionId, session.id))
+
+  const [logCount] = await db
+    .select({ count: sql<number>`count(*)` })
+    .from(apiRequestLogs)
+    .where(eq(apiRequestLogs.sessionId, session.id))
+
+  // Import batches table for counting
+  const { batches } = await import('../database/schema')
+  const [batchCount] = await db
+    .select({ count: sql<number>`count(*)` })
+    .from(batches)
+    .where(eq(batches.sessionId, session.id))
+
+  return {
+    pipelineEvents: Number(eventCount?.count ?? 0),
+    apiRequestLogs: Number(logCount?.count ?? 0),
+    batches: Number(batchCount?.count ?? 0),
   }
 }
 

@@ -130,6 +130,8 @@ export const sseRoutes = new Elysia({ prefix: '/api/sse' })
       await initializeSubscription()
 
       // Create SSE stream
+      let heartbeatInterval: ReturnType<typeof setInterval> | null = null
+      
       const stream = new ReadableStream({
         start(controller) {
           // Add to active connections
@@ -142,24 +144,27 @@ export const sseRoutes = new Elysia({ prefix: '/api/sse' })
           )
 
           // Send heartbeat every 30 seconds
-          const heartbeatInterval = setInterval(() => {
+          heartbeatInterval = setInterval(() => {
             try {
               controller.enqueue(
                 encoder.encode(`event: heartbeat\ndata: ${JSON.stringify({ timestamp: new Date().toISOString() })}\n\n`)
               )
             } catch {
-              clearInterval(heartbeatInterval)
+              if (heartbeatInterval) {
+                clearInterval(heartbeatInterval)
+                heartbeatInterval = null
+              }
             }
           }, 30000)
-
-          // Cleanup on close
-          return () => {
-            clearInterval(heartbeatInterval)
-            removeConnection(senderId, controller)
-          }
         },
         cancel() {
           log.debug('SSE stream cancelled', { senderId })
+          if (heartbeatInterval) {
+            clearInterval(heartbeatInterval)
+            heartbeatInterval = null
+          }
+          // Note: We can't easily access the controller here to remove the connection
+          // The connection will be cleaned up when a write fails in broadcastToSender
         },
       })
 

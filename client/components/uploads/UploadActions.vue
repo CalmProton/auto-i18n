@@ -1,6 +1,15 @@
 <template>
   <div class="flex gap-2">
     <Button
+      variant="ghost"
+      size="sm"
+      @click="showPipelineEvents = true"
+      title="View Pipeline Events"
+    >
+      <Activity class="h-4 w-4" />
+    </Button>
+    
+    <Button
       variant="outline"
       size="sm"
       @click="$emit('toggleExpand')"
@@ -30,6 +39,22 @@
       <Trash2 v-if="!isDeleting" class="h-4 w-4 mr-2" />
       {{ isDeleting ? 'Deleting...' : 'Delete' }}
     </Button>
+    
+    <!-- Pipeline Events Dialog -->
+    <Dialog v-model:open="showPipelineEvents">
+      <DialogContent class="max-w-4xl max-h-[90vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle class="flex items-center gap-2">
+            <Activity class="h-5 w-5" />
+            Pipeline Events - {{ upload.senderId }}
+          </DialogTitle>
+        </DialogHeader>
+        <PipelineEventsPanel 
+          :sender-id="upload.senderId" 
+          @close="showPipelineEvents = false" 
+        />
+      </DialogContent>
+    </Dialog>
   </div>
 </template>
 
@@ -37,8 +62,10 @@
 import { ref } from 'vue'
 import { useUploads } from '@/composables'
 import { Button } from '@/components/ui/button'
-import { ChevronDown, ChevronRight, Trash2 } from 'lucide-vue-next'
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { ChevronDown, ChevronRight, Trash2, Activity } from 'lucide-vue-next'
 import Icon from '../Icon.vue'
+import PipelineEventsPanel from '../PipelineEventsPanel.vue'
 import type { Upload } from '@/types/api'
 
 const props = defineProps<{
@@ -55,6 +82,7 @@ const { deleteUpload } = useUploads()
 
 const isCreatingBatch = ref(false)
 const isDeleting = ref(false)
+const showPipelineEvents = ref(false)
 
 async function handleCreateBatch() {
   if (!confirm('Create a batch job for this upload?')) return
