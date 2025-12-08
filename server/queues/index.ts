@@ -50,6 +50,7 @@ export function getConnectionOptions(): ConnectionOptions {
 /**
  * Queue names use hashtags {} for DragonflyDB thread affinity
  * This ensures related queues are handled by the same Dragonfly thread
+ * Note: BullMQ does not allow colons in queue names, so we use hyphens
  */
 export const QueueNames = {
   // Translation pipeline queues
@@ -57,18 +58,18 @@ export const QueueNames = {
   translationBatch: '{translation-batch}',
   
   // Batch processing queues
-  batchCreate: '{batch}:create',
-  batchSubmit: '{batch}:submit',
-  batchPoll: '{batch}:poll',
-  batchProcess: '{batch}:process',
+  batchCreate: '{batch}-create',
+  batchSubmit: '{batch}-submit',
+  batchPoll: '{batch}-poll',
+  batchProcess: '{batch}-process',
   
   // GitHub integration queues
   github: '{github}',
-  githubFinalize: '{github}:finalize',
+  githubFinalize: '{github}-finalize',
   
   // Cleanup and maintenance queues
-  cleanup: '{maintenance}:cleanup',
-  stats: '{maintenance}:stats',
+  cleanup: '{maintenance}-cleanup',
+  stats: '{maintenance}-stats',
 } as const
 
 export type QueueName = typeof QueueNames[keyof typeof QueueNames]
