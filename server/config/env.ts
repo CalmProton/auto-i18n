@@ -177,3 +177,39 @@ export function resetTranslationConfigCache(): void {
   cachedConfig = null
   envLoaded = false
 }
+
+// Database configuration
+export interface DatabaseConfig {
+  url: string
+  maxConnections?: number
+  idleTimeout?: number
+}
+
+export interface RedisConfig {
+  url: string
+  maxRetries?: number
+  connectionTimeout?: number
+}
+
+export function getDatabaseConfig(): DatabaseConfig {
+  ensureEnvLoaded()
+  const url = readEnv('DATABASE_URL')
+  if (!url) {
+    throw new Error('DATABASE_URL environment variable is required')
+  }
+  return {
+    url,
+    maxConnections: Number(readEnv('DB_MAX_CONNECTIONS')) || 20,
+    idleTimeout: Number(readEnv('DB_IDLE_TIMEOUT')) || 30000,
+  }
+}
+
+export function getRedisConfig(): RedisConfig {
+  ensureEnvLoaded()
+  const url = readEnv('REDIS_URL') || readEnv('VALKEY_URL') || 'redis://localhost:6379'
+  return {
+    url,
+    maxRetries: Number(readEnv('REDIS_MAX_RETRIES')) || 10,
+    connectionTimeout: Number(readEnv('REDIS_CONNECTION_TIMEOUT')) || 10000,
+  }
+}

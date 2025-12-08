@@ -3,6 +3,8 @@
 ## Startup & tooling
 
 - **Runtime**: Bun v1.3.0+; install deps with `bun install`.
+- **Database**: PostgreSQL 18.1 + DragonflyDB (Redis-compatible). Start with `bun run docker:up`.
+- **Migrations**: Run `bun run db:migrate` to initialize database schema.
 - **API Server**: Run with `bun run dev` (uses `--hot` flag for hot reload). ElysiaJS listens on port 3000 by default (configurable via `PORT` env var).
 - **Vue Dashboard**: Run with `bun run client` (Vite dev server on port 5173).
 - **Routes**: Live under `server/routes`; add new endpoints by registering them in `routes/index.ts`. Use ElysiaJS patterns for route definitions.
@@ -12,13 +14,21 @@
 
 ### Backend (ElysiaJS)
 
-- `server/index.ts` boots an ElysiaJS app with CORS support and authentication middleware.
+- `server/index.ts` boots an ElysiaJS app with CORS support, authentication middleware, database initialization, and queue workers.
+- **Database Layer**: `server/database/` provides PostgreSQL (`connection.ts`) and Redis (`redis.ts`) connections using Bun's native clients.
+- **Repositories**: `server/repositories/` provides data access layer for `sessions`, `files`, `batches`, `translation_jobs`.
+- **Cache**: `server/cache/` provides caching utilities, pub/sub, and distributed locks using Redis.
+- **Queues**: `server/queues/` provides BullMQ job queues with DragonflyDB backend for async processing.
 - Auth routes (`/api/auth/*`) are mounted first and are not protected.
 - `authMiddleware` protects all other routes when `ACCESS_KEY` is set in environment.
 - Route modules are grouped: `content`, `global`, `page`, `batch`, `github`, `dashboard`.
-- Upload handlers call `services/fileProcessor` to persist files under `tmp/<senderId>/uploads/<locale>/<type>`.
-- `utils/fileValidation` parses multipart payloads, validates locales via `config/locales`, and normalizes folder structure.
-- Metadata from requests is merged with `tmp/<senderId>/metadata.json` through `utils/metadataInput` and `utils/jobMetadata`.
+
+### Database Architecture
+
+- **PostgreSQL**: Primary data store for sessions, files, batches, translation jobs.
+- **DragonflyDB**: Redis-compatible cache and queue backend (runs with `--cluster_mode=emulated --lock_on_hashtags` for BullMQ optimization).
+- **BullMQ**: Job queue for async processing (batch polling, output processing, GitHub finalization).
+- **Schema**: `server/database/schema.sql` defines tables with UUID PKs, JSONB metadata, and full-text search.
 
 ### Frontend (Vue 3)
 
@@ -129,7 +139,65 @@ All dashboard endpoints use helper functions from `utils/dashboardUtils.ts`.
 - **Error Handling**: Use try-catch with proper error logging; return standardized `ErrorResponse` shapes.
 - **Type Safety**: Leverage TypeScript throughout; import types from `server/types` and `client/types`.
 
-## File Storage Structure
+## Database Schema
+
+### Main Tables (PostgreSQL)
+
+- **sessions**: Upload/change sessions with repository & locale info
+- **translation_jobs**: Individual jobs within sessions
+- **files**: All file types (upload, translation, delta, original) with content stored as TEXT
+- **batches**: OpenAI batch jobs with manifest as JSONB
+- **batch_requests**: Individual requests within batches
+- **translation_stats**: Dashboard statistics
+
+### Repository Pattern
+
+Use repositories in `server/repositories/` for all database operations:
+
+```typescript
+import { createSession, getSessionBySenderId } from '../repositories'
+
+// Create session
+const session = await createSession({
+  senderId: 'my-sender',
+  sessionType: 'upload',
+  sourceLocale: 'en',
+})
+
+// Query session
+const existing = await getSessionBySenderId('my-sender')
+```
+
+### Cache Pattern
+
+Use cache utilities in `server/cache/` for caching and pub/sub:
+
+```typescript
+import { cacheGet, cacheSet, publish, Channels } from '../cache'
+
+// Cache data
+await cacheSet('key', data, 300) // 5 minute TTL
+const cached = await cacheGet('key', true) // parse JSON
+
+// Publish events
+await publish(Channels.batchCompleted, { batchId, status: 'completed' })
+```
+
+### Queue Pattern
+
+Use BullMQ queues in `server/queues/` for async processing:
+
+```typescript
+import { addBatchPollJob, addGitHubFinalizeJob } from '../queues'
+
+// Add polling job with delay
+await addBatchPollJob({ batchId, senderId, openaiBatchId }, { delay: 30000 })
+
+// Add finalization job
+await addGitHubFinalizeJob({ senderId, sessionId })
+```
+
+## File Storage Structure (Legacy - Being Migrated to Database)
 
 ```text
 tmp/

@@ -30,6 +30,8 @@ services:
       - --dir=/data
       - --dbfilename=dump-{timestamp}
       - --snapshot_cron=*/5 * * * *
+      - --cluster_mode=emulated
+      - --lock_on_hashtags
     expose:
       - '6379'
     restart: unless-stopped
