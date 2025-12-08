@@ -4,7 +4,7 @@
 
 - **Runtime**: Bun v1.3.0+; install deps with `bun install`.
 - **Database**: PostgreSQL 18.1 + DragonflyDB (Redis-compatible). Start with `bun run docker:up`.
-- **Migrations**: Run `bun run db:migrate` to initialize database schema.
+- **Migrations**: Run `bun run db:generate` to generate migrations, `bun run db:migrate` to apply them.
 - **API Server**: Run with `bun run dev` (uses `--hot` flag for hot reload). ElysiaJS listens on port 3000 by default (configurable via `PORT` env var).
 - **Vue Dashboard**: Run with `bun run client` (Vite dev server on port 5173).
 - **Routes**: Live under `server/routes`; add new endpoints by registering them in `routes/index.ts`. Use ElysiaJS patterns for route definitions.
@@ -15,8 +15,8 @@
 ### Backend (ElysiaJS)
 
 - `server/index.ts` boots an ElysiaJS app with CORS support, authentication middleware, database initialization, and queue workers.
-- **Database Layer**: `server/database/` provides PostgreSQL (`connection.ts`) and Redis (`redis.ts`) connections using Bun's native clients.
-- **Repositories**: `server/repositories/` provides data access layer for `sessions`, `files`, `batches`, `translation_jobs`.
+- **Database Layer**: `server/database/` provides Drizzle ORM (`connection.ts`), schema definitions (`schema.ts`), and Redis (`redis.ts`) connections.
+- **Repositories**: `server/repositories/` provides data access layer using Drizzle ORM for `sessions`, `files`, `batches`, `translation_jobs`.
 - **Cache**: `server/cache/` provides caching utilities, pub/sub, and distributed locks using Redis.
 - **Queues**: `server/queues/` provides BullMQ job queues with DragonflyDB backend for async processing.
 - Auth routes (`/api/auth/*`) are mounted first and are not protected.
@@ -26,9 +26,10 @@
 ### Database Architecture
 
 - **PostgreSQL**: Primary data store for sessions, files, batches, translation jobs.
+- **Drizzle ORM**: Type-safe database layer with schema in `server/database/schema.ts`.
 - **DragonflyDB**: Redis-compatible cache and queue backend (runs with `--cluster_mode=emulated --lock_on_hashtags` for BullMQ optimization).
 - **BullMQ**: Job queue for async processing (batch polling, output processing, GitHub finalization).
-- **Schema**: `server/database/schema.sql` defines tables with UUID PKs, JSONB metadata, and full-text search.
+- **Migrations**: Managed by Drizzle Kit in `server/database/migrations/`.
 
 ### Frontend (Vue 3)
 
@@ -225,7 +226,7 @@ tmp/
 
 **Backend:**
 
-- ElysiaJS, @elysiajs/cors, openai, @anthropic-ai/sdk, winston, zod
+- ElysiaJS, @elysiajs/cors, drizzle-orm, openai, @anthropic-ai/sdk, winston, zod
 
 **Frontend:**
 

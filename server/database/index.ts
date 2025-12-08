@@ -3,17 +3,21 @@
  * Provides unified access to PostgreSQL and Redis connections
  */
 
-// PostgreSQL connection and utilities
+// PostgreSQL connection and utilities (Drizzle ORM)
 export {
   getDatabase,
+  getSqlClient,
   isDatabaseConnected,
   closeDatabase,
-  query,
   transaction,
   initializeDatabase,
   healthCheck as databaseHealthCheck,
-  type SQL,
+  schema,
+  type Database,
 } from './connection'
+
+// Re-export schema types and tables
+export * from './schema'
 
 // Redis/DragonflyDB connection and utilities
 export {

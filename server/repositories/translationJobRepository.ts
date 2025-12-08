@@ -1,9 +1,11 @@
 /**
  * Translation Job Repository
- * Handles CRUD operations for translation jobs within sessions
- * Replaces file-based storage in metadata.json jobs array
+ * Handles CRUD operations for translation jobs within sessions using Drizzle ORM
  */
+import { eq, and, desc, sql, isNull } from 'drizzle-orm'
 import { getDatabase } from '../database/connection'
+import { translationJobs } from '../database/schema'
+import type { TranslationJob, NewTranslationJob, JobType } from '../database/schema'
 import { createScopedLogger } from '../utils/logger'
 
 const log = createScopedLogger('repository:translation-job')
@@ -12,29 +14,7 @@ const log = createScopedLogger('repository:translation-job')
 // TYPES
 // ============================================================================
 
-export type JobType = 'content' | 'global' | 'page'
-
-export interface TranslationJob {
-  id: string
-  sessionId: string
-  jobId: string
-  jobType?: JobType
-  
-  // Translation details
-  sourceLocale: string
-  targetLocales: string[]
-  
-  // GitHub integration
-  githubIssueNumber?: number
-  githubIssueUrl?: string
-  githubPrNumber?: number
-  githubPrUrl?: string
-  githubBranch?: string
-  
-  // Timestamps
-  createdAt: Date
-  updatedAt: Date
-}
+export type { TranslationJob, JobType }
 
 export interface CreateTranslationJobInput {
   sessionId: string
@@ -62,127 +42,93 @@ export interface TranslationJobFilter {
 }
 
 // ============================================================================
-// MAPPER
-// ============================================================================
-
-function mapRowToJob(row: Record<string, unknown>): TranslationJob {
-  return {
-    id: row.id as string,
-    sessionId: row.session_id as string,
-    jobId: row.job_id as string,
-    jobType: row.job_type as JobType | undefined,
-    sourceLocale: row.source_locale as string,
-    targetLocales: (row.target_locales as string[]) || [],
-    githubIssueNumber: row.github_issue_number as number | undefined,
-    githubIssueUrl: row.github_issue_url as string | undefined,
-    githubPrNumber: row.github_pr_number as number | undefined,
-    githubPrUrl: row.github_pr_url as string | undefined,
-    githubBranch: row.github_branch as string | undefined,
-    createdAt: new Date(row.created_at as string),
-    updatedAt: new Date(row.updated_at as string),
-  }
-}
-
-// ============================================================================
 // REPOSITORY METHODS
 // ============================================================================
 
 /**
  * Create a new translation job
  */
-export async function createTranslationJob(input: CreateTranslationJobInput): Promise<TranslationJob> {
+export async function createTranslationJob(
+  input: CreateTranslationJobInput
+): Promise<TranslationJob> {
   const db = getDatabase()
-  
-  const rows = await db`
-    INSERT INTO translation_jobs (
-      session_id,
-      job_id,
-      job_type,
-      source_locale,
-      target_locales
-    ) VALUES (
-      ${input.sessionId},
-      ${input.jobId},
-      ${input.jobType || null},
-      ${input.sourceLocale},
-      ${input.targetLocales || []}
-    )
-    RETURNING *
-  `
-  
-  const job = mapRowToJob(rows[0])
+
+  const [job] = await db
+    .insert(translationJobs)
+    .values({
+      sessionId: input.sessionId,
+      jobId: input.jobId,
+      jobType: input.jobType,
+      sourceLocale: input.sourceLocale,
+      targetLocales: input.targetLocales || [],
+    })
+    .returning()
+
   log.debug('Created translation job', { sessionId: job.sessionId, jobId: job.jobId })
-  
+
   return job
 }
 
 /**
  * Get a translation job by session ID and job ID
  */
-export async function getTranslationJob(sessionId: string, jobId: string): Promise<TranslationJob | null> {
+export async function getTranslationJob(
+  sessionId: string,
+  jobId: string
+): Promise<TranslationJob | null> {
   const db = getDatabase()
-  
-  const rows = await db`
-    SELECT * FROM translation_jobs 
-    WHERE session_id = ${sessionId}
-    AND job_id = ${jobId}
-  `
-  
-  if (rows.length === 0) {
-    return null
-  }
-  
-  return mapRowToJob(rows[0])
+
+  const [job] = await db
+    .select()
+    .from(translationJobs)
+    .where(and(eq(translationJobs.sessionId, sessionId), eq(translationJobs.jobId, jobId)))
+    .limit(1)
+
+  return job || null
 }
 
 /**
- * Get a translation job by ID
+ * Get a translation job by ID (UUID)
  */
 export async function getTranslationJobById(id: string): Promise<TranslationJob | null> {
   const db = getDatabase()
-  
-  const rows = await db`
-    SELECT * FROM translation_jobs WHERE id = ${id}
-  `
-  
-  if (rows.length === 0) {
-    return null
-  }
-  
-  return mapRowToJob(rows[0])
+
+  const [job] = await db.select().from(translationJobs).where(eq(translationJobs.id, id)).limit(1)
+
+  return job || null
 }
 
 /**
  * Update a translation job
  */
 export async function updateTranslationJob(
-  sessionId: string, 
-  jobId: string, 
+  sessionId: string,
+  jobId: string,
   input: UpdateTranslationJobInput
 ): Promise<TranslationJob | null> {
   const db = getDatabase()
-  
-  const rows = await db`
-    UPDATE translation_jobs 
-    SET 
-      target_locales = COALESCE(${input.targetLocales || null}, target_locales),
-      github_issue_number = COALESCE(${input.githubIssueNumber ?? null}, github_issue_number),
-      github_issue_url = COALESCE(${input.githubIssueUrl || null}, github_issue_url),
-      github_pr_number = COALESCE(${input.githubPrNumber ?? null}, github_pr_number),
-      github_pr_url = COALESCE(${input.githubPrUrl || null}, github_pr_url),
-      github_branch = COALESCE(${input.githubBranch || null}, github_branch)
-    WHERE session_id = ${sessionId}
-    AND job_id = ${jobId}
-    RETURNING *
-  `
-  
-  if (rows.length === 0) {
+
+  // Build update object with only defined fields
+  const updateData: Partial<NewTranslationJob> = {}
+  if (input.targetLocales !== undefined) updateData.targetLocales = input.targetLocales
+  if (input.githubIssueNumber !== undefined) updateData.githubIssueNumber = input.githubIssueNumber
+  if (input.githubIssueUrl !== undefined) updateData.githubIssueUrl = input.githubIssueUrl
+  if (input.githubPrNumber !== undefined) updateData.githubPrNumber = input.githubPrNumber
+  if (input.githubPrUrl !== undefined) updateData.githubPrUrl = input.githubPrUrl
+  if (input.githubBranch !== undefined) updateData.githubBranch = input.githubBranch
+
+  const [job] = await db
+    .update(translationJobs)
+    .set(updateData)
+    .where(and(eq(translationJobs.sessionId, sessionId), eq(translationJobs.jobId, jobId)))
+    .returning()
+
+  if (!job) {
     return null
   }
-  
-  const job = mapRowToJob(rows[0])
+
   log.debug('Updated translation job', { sessionId, jobId, updates: Object.keys(input) })
-  
+
   return job
 }
 
@@ -191,66 +137,46 @@ export async function updateTranslationJob(
  */
 export async function deleteTranslationJob(sessionId: string, jobId: string): Promise<boolean> {
   const db = getDatabase()
-  
-  const result = await db`
-    DELETE FROM translation_jobs 
-    WHERE session_id = ${sessionId}
-    AND job_id = ${jobId}
-    RETURNING id
-  `
-  
+
+  const result = await db
+    .delete(translationJobs)
+    .where(and(eq(translationJobs.sessionId, sessionId), eq(translationJobs.jobId, jobId)))
+    .returning({ id: translationJobs.id })
+
   return result.length > 0
 }
 
 /**
  * List translation jobs with filtering
  */
-export async function listTranslationJobs(filter: TranslationJobFilter = {}): Promise<TranslationJob[]> {
+export async function listTranslationJobs(
+  filter: TranslationJobFilter = {}
+): Promise<TranslationJob[]> {
   const db = getDatabase()
   const limit = filter.limit || 50
   const offset = filter.offset || 0
-  
-  let rows: Record<string, unknown>[]
-  
-  if (filter.sessionId && filter.hasPr === true) {
-    rows = await db`
-      SELECT * FROM translation_jobs 
-      WHERE session_id = ${filter.sessionId}
-      AND github_pr_number IS NOT NULL
-      ORDER BY created_at DESC
-      LIMIT ${limit} OFFSET ${offset}
-    `
-  } else if (filter.sessionId && filter.hasPr === false) {
-    rows = await db`
-      SELECT * FROM translation_jobs 
-      WHERE session_id = ${filter.sessionId}
-      AND github_pr_number IS NULL
-      ORDER BY created_at DESC
-      LIMIT ${limit} OFFSET ${offset}
-    `
-  } else if (filter.sessionId) {
-    rows = await db`
-      SELECT * FROM translation_jobs 
-      WHERE session_id = ${filter.sessionId}
-      ORDER BY created_at DESC
-      LIMIT ${limit} OFFSET ${offset}
-    `
-  } else if (filter.jobType) {
-    rows = await db`
-      SELECT * FROM translation_jobs 
-      WHERE job_type = ${filter.jobType}
-      ORDER BY created_at DESC
-      LIMIT ${limit} OFFSET ${offset}
-    `
-  } else {
-    rows = await db`
-      SELECT * FROM translation_jobs 
-      ORDER BY created_at DESC
-      LIMIT ${limit} OFFSET ${offset}
-    `
+
+  const conditions = []
+
+  if (filter.sessionId) {
+    conditions.push(eq(translationJobs.sessionId, filter.sessionId))
   }
-  
-  return rows.map(mapRowToJob)
+  if (filter.jobType) {
+    conditions.push(eq(translationJobs.jobType, filter.jobType))
+  }
+  if (filter.hasPr === true) {
+    conditions.push(sql`${translationJobs.githubPrNumber} IS NOT NULL`)
+  } else if (filter.hasPr === false) {
+    conditions.push(isNull(translationJobs.githubPrNumber))
+  }
+
+  let query = db.select().from(translationJobs)
+
+  if (conditions.length > 0) {
+    query = query.where(and(...conditions)) as typeof query
+  }
+
+  return query.orderBy(desc(translationJobs.createdAt)).limit(limit).offset(offset)
 }
 
 /**
@@ -267,11 +193,11 @@ export async function getOrCreateTranslationJob(
   input: CreateTranslationJobInput
 ): Promise<{ job: TranslationJob; created: boolean }> {
   const existing = await getTranslationJob(input.sessionId, input.jobId)
-  
+
   if (existing) {
     return { job: existing, created: false }
   }
-  
+
   const job = await createTranslationJob(input)
   return { job, created: true }
 }
@@ -313,25 +239,18 @@ export async function updateGitHubPr(
  */
 export async function getJobsWithoutPr(sessionId?: string): Promise<TranslationJob[]> {
   const db = getDatabase()
-  
-  let rows: Record<string, unknown>[]
-  
+
+  const conditions = [isNull(translationJobs.githubPrNumber)]
+
   if (sessionId) {
-    rows = await db`
-      SELECT * FROM translation_jobs 
-      WHERE session_id = ${sessionId}
-      AND github_pr_number IS NULL
-      ORDER BY created_at DESC
-    `
-  } else {
-    rows = await db`
-      SELECT * FROM translation_jobs 
-      WHERE github_pr_number IS NULL
-      ORDER BY created_at DESC
-    `
+    conditions.push(eq(translationJobs.sessionId, sessionId))
   }
-  
-  return rows.map(mapRowToJob)
+
+  return db
+    .select()
+    .from(translationJobs)
+    .where(and(...conditions))
+    .orderBy(desc(translationJobs.createdAt))
 }
 
 /**
@@ -339,19 +258,22 @@ export async function getJobsWithoutPr(sessionId?: string): Promise<TranslationJ
  */
 export async function countTranslationJobs(filter: TranslationJobFilter = {}): Promise<number> {
   const db = getDatabase()
-  
-  let result: { count: string }[]
-  
+
+  const conditions = []
+
   if (filter.sessionId) {
-    result = await db`
-      SELECT COUNT(*) as count FROM translation_jobs 
-      WHERE session_id = ${filter.sessionId}
-    `
-  } else {
-    result = await db`SELECT COUNT(*) as count FROM translation_jobs`
+    conditions.push(eq(translationJobs.sessionId, filter.sessionId))
   }
-  
-  return parseInt(result[0].count, 10)
+
+  let query = db.select({ count: sql<number>`count(*)` }).from(translationJobs)
+
+  if (conditions.length > 0) {
+    query = query.where(and(...conditions)) as typeof query
+  }
+
+  const [result] = await query
+
+  return Number(result?.count || 0)
 }
 
 /**
@@ -363,18 +285,14 @@ export async function addTargetLocales(
   locales: string[]
 ): Promise<TranslationJob | null> {
   const db = getDatabase()
-  
-  const rows = await db`
-    UPDATE translation_jobs 
-    SET target_locales = array_cat(target_locales, ${locales}::text[])
-    WHERE session_id = ${sessionId}
-    AND job_id = ${jobId}
-    RETURNING *
-  `
-  
-  if (rows.length === 0) {
-    return null
-  }
-  
-  return mapRowToJob(rows[0])
+
+  const [job] = await db
+    .update(translationJobs)
+    .set({
+      targetLocales: sql`array_cat(${translationJobs.targetLocales}, ${locales}::text[])`,
+    })
+    .where(and(eq(translationJobs.sessionId, sessionId), eq(translationJobs.jobId, jobId)))
+    .returning()
+
+  return job || null
 }

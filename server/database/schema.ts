@@ -1,0 +1,370 @@
+/**
+ * Drizzle ORM Schema
+ * Maps to the existing PostgreSQL schema in schema.sql
+ */
+import {
+  pgTable,
+  uuid,
+  varchar,
+  text,
+  timestamp,
+  jsonb,
+  integer,
+  index,
+  unique,
+} from 'drizzle-orm/pg-core'
+import { relations, sql } from 'drizzle-orm'
+
+// ============================================================================
+// ENUMS (as string literals with CHECK constraints in DB)
+// ============================================================================
+
+export const sessionTypeValues = ['upload', 'changes'] as const
+export type SessionType = (typeof sessionTypeValues)[number]
+
+export const sessionStatusValues = ['active', 'processing', 'completed', 'failed', 'submitted'] as const
+export type SessionStatus = (typeof sessionStatusValues)[number]
+
+export const fileTypeValues = ['upload', 'translation', 'delta', 'original'] as const
+export type FileType = (typeof fileTypeValues)[number]
+
+export const contentTypeValues = ['content', 'global', 'page'] as const
+export type ContentType = (typeof contentTypeValues)[number]
+
+export const fileFormatValues = ['markdown', 'json'] as const
+export type FileFormat = (typeof fileFormatValues)[number]
+
+export const jobTypeValues = ['content', 'global', 'page'] as const
+export type JobType = (typeof jobTypeValues)[number]
+
+export const batchStatusValues = ['created', 'submitted', 'processing', 'completed', 'failed', 'cancelled'] as const
+export type BatchStatus = (typeof batchStatusValues)[number]
+
+export const openAIBatchStatusValues = ['validating', 'failed', 'in_progress', 'finalizing', 'completed', 'expired', 'cancelling', 'cancelled'] as const
+export type OpenAIBatchStatus = (typeof openAIBatchStatusValues)[number]
+
+export const batchRequestStatusValues = ['pending', 'completed', 'failed'] as const
+export type BatchRequestStatus = (typeof batchRequestStatusValues)[number]
+
+// ============================================================================
+// SESSIONS TABLE
+// ============================================================================
+
+export const sessions = pgTable('sessions', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  senderId: varchar('sender_id', { length: 255 }).notNull().unique(),
+  sessionType: varchar('session_type', { length: 50 }).notNull().$type<SessionType>(),
+  status: varchar('status', { length: 50 }).notNull().default('active').$type<SessionStatus>(),
+
+  // Repository information (for changes workflow)
+  repositoryOwner: varchar('repository_owner', { length: 255 }),
+  repositoryName: varchar('repository_name', { length: 255 }),
+  baseBranch: varchar('base_branch', { length: 255 }),
+  baseCommitSha: varchar('base_commit_sha', { length: 40 }),
+  commitSha: varchar('commit_sha', { length: 40 }),
+  commitMessage: text('commit_message'),
+  commitAuthor: varchar('commit_author', { length: 255 }),
+  commitTimestamp: timestamp('commit_timestamp', { withTimezone: true }),
+
+  // Locale information
+  sourceLocale: varchar('source_locale', { length: 10 }).notNull(),
+  targetLocales: text('target_locales').array(),
+
+  // Timestamps
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  expiresAt: timestamp('expires_at', { withTimezone: true }),
+
+  // Additional metadata
+  metadata: jsonb('metadata').default({}).$type<Record<string, unknown>>(),
+}, (table) => [
+  index('idx_sessions_sender_id').on(table.senderId),
+  index('idx_sessions_status').on(table.status),
+  index('idx_sessions_type').on(table.sessionType),
+  index('idx_sessions_created_at').on(table.createdAt),
+])
+
+// ============================================================================
+// TRANSLATION_JOBS TABLE
+// ============================================================================
+
+export const translationJobs = pgTable('translation_jobs', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  sessionId: uuid('session_id').notNull().references(() => sessions.id, { onDelete: 'cascade' }),
+  jobId: varchar('job_id', { length: 255 }).notNull(),
+  jobType: varchar('job_type', { length: 50 }).$type<JobType>(),
+
+  // Translation details
+  sourceLocale: varchar('source_locale', { length: 10 }).notNull(),
+  targetLocales: text('target_locales').array(),
+
+  // GitHub integration
+  githubIssueNumber: integer('github_issue_number'),
+  githubIssueUrl: text('github_issue_url'),
+  githubPrNumber: integer('github_pr_number'),
+  githubPrUrl: text('github_pr_url'),
+  githubBranch: varchar('github_branch', { length: 255 }),
+
+  // Timestamps
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  index('idx_translation_jobs_session').on(table.sessionId),
+  index('idx_translation_jobs_job_id').on(table.jobId),
+  unique('translation_jobs_session_job_unique').on(table.sessionId, table.jobId),
+])
+
+// ============================================================================
+// FILES TABLE
+// ============================================================================
+
+export const files = pgTable('files', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  sessionId: uuid('session_id').notNull().references(() => sessions.id, { onDelete: 'cascade' }),
+  jobId: uuid('job_id').references(() => translationJobs.id, { onDelete: 'set null' }),
+
+  // File classification
+  fileType: varchar('file_type', { length: 50 }).notNull().$type<FileType>(),
+  contentType: varchar('content_type', { length: 50 }).notNull().$type<ContentType>(),
+  format: varchar('format', { length: 20 }).notNull().$type<FileFormat>(),
+
+  // File location/identification
+  locale: varchar('locale', { length: 10 }).notNull(),
+  relativePath: text('relative_path').notNull(),
+  fileName: varchar('file_name', { length: 255 }).notNull(),
+
+  // File content
+  content: text('content').notNull(),
+  contentHash: varchar('content_hash', { length: 64 }),
+  fileSize: integer('file_size'),
+
+  // Timestamps
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+
+  // Additional metadata
+  metadata: jsonb('metadata').default({}).$type<Record<string, unknown>>(),
+}, (table) => [
+  index('idx_files_session').on(table.sessionId),
+  index('idx_files_type').on(table.fileType),
+  index('idx_files_content_type').on(table.contentType),
+  index('idx_files_locale').on(table.locale),
+  index('idx_files_path').on(table.relativePath),
+  unique('files_session_type_locale_path_unique').on(table.sessionId, table.fileType, table.locale, table.relativePath),
+])
+
+// ============================================================================
+// BATCHES TABLE
+// ============================================================================
+
+export const batches = pgTable('batches', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  batchId: varchar('batch_id', { length: 255 }).notNull().unique(),
+  sessionId: uuid('session_id').notNull().references(() => sessions.id, { onDelete: 'cascade' }),
+
+  // Batch configuration
+  sourceLocale: varchar('source_locale', { length: 10 }).notNull(),
+  targetLocales: text('target_locales').array(),
+  contentTypes: text('content_types').array(),
+  model: varchar('model', { length: 100 }).notNull(),
+
+  // OpenAI Batch API details
+  openaiBatchId: varchar('openai_batch_id', { length: 255 }),
+  openaiStatus: varchar('openai_status', { length: 50 }).$type<OpenAIBatchStatus>(),
+
+  // Progress tracking
+  totalRequests: integer('total_requests').notNull().default(0),
+  completedRequests: integer('completed_requests').default(0),
+  failedRequests: integer('failed_requests').default(0),
+
+  // Status
+  status: varchar('status', { length: 50 }).notNull().default('created').$type<BatchStatus>(),
+
+  // Timestamps
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  submittedAt: timestamp('submitted_at', { withTimezone: true }),
+  completedAt: timestamp('completed_at', { withTimezone: true }),
+
+  // Error tracking
+  errorMessage: text('error_message'),
+
+  // Manifest data
+  manifest: jsonb('manifest').notNull().$type<BatchManifest>(),
+}, (table) => [
+  index('idx_batches_batch_id').on(table.batchId),
+  index('idx_batches_session').on(table.sessionId),
+  index('idx_batches_status').on(table.status),
+  index('idx_batches_created_at').on(table.createdAt),
+])
+
+// Type for BatchManifest
+export interface BatchManifest {
+  batchId: string
+  senderId: string
+  sourceLocale: string
+  targetLocales: string[]
+  contentTypes: string[]
+  model: string
+  totalRequests: number
+  files: Array<{
+    relativePath: string
+    contentType: string
+    targetLocales: string[]
+  }>
+  createdAt: string
+}
+
+// ============================================================================
+// BATCH_REQUESTS TABLE
+// ============================================================================
+
+export const batchRequests = pgTable('batch_requests', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  batchId: uuid('batch_id').notNull().references(() => batches.id, { onDelete: 'cascade' }),
+
+  // Request identification
+  customId: varchar('custom_id', { length: 255 }).notNull(),
+  requestIndex: integer('request_index').notNull(),
+
+  // File reference
+  fileId: uuid('file_id').references(() => files.id, { onDelete: 'set null' }),
+  relativePath: text('relative_path').notNull(),
+  targetLocale: varchar('target_locale', { length: 10 }).notNull(),
+
+  // Request details
+  requestBody: jsonb('request_body').notNull().$type<Record<string, unknown>>(),
+
+  // Response details
+  responseBody: jsonb('response_body').$type<Record<string, unknown>>(),
+  responseStatus: integer('response_status'),
+
+  // Status
+  status: varchar('status', { length: 50 }).notNull().default('pending').$type<BatchRequestStatus>(),
+  errorMessage: text('error_message'),
+
+  // Timestamps
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  index('idx_batch_requests_batch').on(table.batchId),
+  index('idx_batch_requests_status').on(table.status),
+  index('idx_batch_requests_locale').on(table.targetLocale),
+  index('idx_batch_requests_custom_id').on(table.customId),
+  unique('batch_requests_batch_custom_unique').on(table.batchId, table.customId),
+])
+
+// ============================================================================
+// TRANSLATION_STATS TABLE
+// ============================================================================
+
+export const translationStats = pgTable('translation_stats', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  sessionId: uuid('session_id').notNull().references(() => sessions.id, { onDelete: 'cascade' }),
+
+  // Counts by type
+  uploadsCount: integer('uploads_count').default(0),
+  translationsCount: integer('translations_count').default(0),
+
+  // Counts by content type
+  contentFiles: integer('content_files').default(0),
+  globalFiles: integer('global_files').default(0),
+  pageFiles: integer('page_files').default(0),
+
+  // Locale coverage
+  sourceLocale: varchar('source_locale', { length: 10 }),
+  targetLocalesCount: integer('target_locales_count').default(0),
+  completedLocales: text('completed_locales').array(),
+
+  // Batch statistics
+  batchesCount: integer('batches_count').default(0),
+  activeBatches: integer('active_batches').default(0),
+  completedBatches: integer('completed_batches').default(0),
+
+  // Timestamps
+  calculatedAt: timestamp('calculated_at', { withTimezone: true }).notNull().defaultNow(),
+
+  // Additional stats
+  stats: jsonb('stats').default({}).$type<Record<string, unknown>>(),
+}, (table) => [
+  index('idx_translation_stats_session').on(table.sessionId),
+  index('idx_translation_stats_calculated').on(table.calculatedAt),
+])
+
+// ============================================================================
+// RELATIONS
+// ============================================================================
+
+export const sessionsRelations = relations(sessions, ({ many }) => ({
+  translationJobs: many(translationJobs),
+  files: many(files),
+  batches: many(batches),
+  translationStats: many(translationStats),
+}))
+
+export const translationJobsRelations = relations(translationJobs, ({ one, many }) => ({
+  session: one(sessions, {
+    fields: [translationJobs.sessionId],
+    references: [sessions.id],
+  }),
+  files: many(files),
+}))
+
+export const filesRelations = relations(files, ({ one }) => ({
+  session: one(sessions, {
+    fields: [files.sessionId],
+    references: [sessions.id],
+  }),
+  job: one(translationJobs, {
+    fields: [files.jobId],
+    references: [translationJobs.id],
+  }),
+}))
+
+export const batchesRelations = relations(batches, ({ one, many }) => ({
+  session: one(sessions, {
+    fields: [batches.sessionId],
+    references: [sessions.id],
+  }),
+  requests: many(batchRequests),
+}))
+
+export const batchRequestsRelations = relations(batchRequests, ({ one }) => ({
+  batch: one(batches, {
+    fields: [batchRequests.batchId],
+    references: [batches.id],
+  }),
+  file: one(files, {
+    fields: [batchRequests.fileId],
+    references: [files.id],
+  }),
+}))
+
+export const translationStatsRelations = relations(translationStats, ({ one }) => ({
+  session: one(sessions, {
+    fields: [translationStats.sessionId],
+    references: [sessions.id],
+  }),
+}))
+
+// ============================================================================
+// TYPE EXPORTS (inferred from tables)
+// ============================================================================
+
+export type Session = typeof sessions.$inferSelect
+export type NewSession = typeof sessions.$inferInsert
+
+export type TranslationJob = typeof translationJobs.$inferSelect
+export type NewTranslationJob = typeof translationJobs.$inferInsert
+
+export type File = typeof files.$inferSelect
+export type NewFile = typeof files.$inferInsert
+
+export type Batch = typeof batches.$inferSelect
+export type NewBatch = typeof batches.$inferInsert
+
+export type BatchRequest = typeof batchRequests.$inferSelect
+export type NewBatchRequest = typeof batchRequests.$inferInsert
+
+export type TranslationStat = typeof translationStats.$inferSelect
+export type NewTranslationStat = typeof translationStats.$inferInsert

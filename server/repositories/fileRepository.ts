@@ -1,9 +1,11 @@
 /**
  * File Repository
- * Handles CRUD operations for files (uploads, translations, deltas)
- * Replaces file-based storage in tmp/<senderId>/uploads/, translations/, deltas/
+ * Handles CRUD operations for files (uploads, translations, deltas) using Drizzle ORM
  */
+import { eq, and, desc, asc, sql } from 'drizzle-orm'
 import { getDatabase } from '../database/connection'
+import { files } from '../database/schema'
+import type { File, NewFile, FileType, ContentType, FileFormat } from '../database/schema'
 import { createScopedLogger } from '../utils/logger'
 import { createHash } from 'crypto'
 
@@ -13,44 +15,16 @@ const log = createScopedLogger('repository:file')
 // TYPES
 // ============================================================================
 
-export type FileType = 'upload' | 'translation' | 'delta' | 'original'
-export type ContentType = 'content' | 'global' | 'page'
-export type FileFormat = 'markdown' | 'json'
-
-export interface TranslationFile {
-  id: string
-  sessionId: string
-  jobId?: string
-  
-  // File classification
-  fileType: FileType
-  contentType: ContentType
-  format: FileFormat
-  
-  // File location
-  locale: string
-  relativePath: string
-  fileName: string
-  
-  // Content
-  content: string
-  contentHash?: string
-  fileSize?: number
-  
-  // Timestamps
-  createdAt: Date
-  updatedAt: Date
-  
-  // Metadata
-  metadata: Record<string, unknown>
-}
+// Re-export schema types with aliases for compatibility
+export type TranslationFile = File
+export type { FileType, ContentType, FileFormat }
 
 export interface CreateFileInput {
   sessionId: string
   jobId?: string
   fileType: FileType
   contentType: ContentType
-  format: FileFormat
+  format?: FileFormat
   locale: string
   relativePath: string
   fileName: string
@@ -97,30 +71,6 @@ function detectFormat(fileName: string): FileFormat {
 }
 
 // ============================================================================
-// MAPPER
-// ============================================================================
-
-function mapRowToFile(row: Record<string, unknown>): TranslationFile {
-  return {
-    id: row.id as string,
-    sessionId: row.session_id as string,
-    jobId: row.job_id as string | undefined,
-    fileType: row.file_type as FileType,
-    contentType: row.content_type as ContentType,
-    format: row.format as FileFormat,
-    locale: row.locale as string,
-    relativePath: row.relative_path as string,
-    fileName: row.file_name as string,
-    content: row.content as string,
-    contentHash: row.content_hash as string | undefined,
-    fileSize: row.file_size as number | undefined,
-    createdAt: new Date(row.created_at as string),
-    updatedAt: new Date(row.updated_at as string),
-    metadata: (row.metadata as Record<string, unknown>) || {},
-  }
-}
-
-// ============================================================================
 // REPOSITORY METHODS
 // ============================================================================
 
@@ -129,50 +79,36 @@ function mapRowToFile(row: Record<string, unknown>): TranslationFile {
  */
 export async function createFile(input: CreateFileInput): Promise<TranslationFile> {
   const db = getDatabase()
-  
+
   const contentHash = computeHash(input.content)
   const fileSize = Buffer.byteLength(input.content, 'utf8')
   const format = input.format || detectFormat(input.fileName)
-  
-  const rows = await db`
-    INSERT INTO files (
-      session_id,
-      job_id,
-      file_type,
-      content_type,
+
+  const [file] = await db
+    .insert(files)
+    .values({
+      sessionId: input.sessionId,
+      jobId: input.jobId,
+      fileType: input.fileType,
+      contentType: input.contentType,
       format,
-      locale,
-      relative_path,
-      file_name,
-      content,
-      content_hash,
-      file_size,
-      metadata
-    ) VALUES (
-      ${input.sessionId},
-      ${input.jobId || null},
-      ${input.fileType},
-      ${input.contentType},
-      ${format},
-      ${input.locale},
-      ${input.relativePath},
-      ${input.fileName},
-      ${input.content},
-      ${contentHash},
-      ${fileSize},
-      ${JSON.stringify(input.metadata || {})}
-    )
-    RETURNING *
-  `
-  
-  const file = mapRowToFile(rows[0])
-  log.debug('Created file', { 
-    sessionId: file.sessionId, 
+      locale: input.locale,
+      relativePath: input.relativePath,
+      fileName: input.fileName,
+      content: input.content,
+      contentHash,
+      fileSize,
+      metadata: input.metadata || {},
+    })
+    .returning()
+
+  log.debug('Created file', {
+    sessionId: file.sessionId,
     fileType: file.fileType,
-    locale: file.locale, 
-    path: file.relativePath 
+    locale: file.locale,
+    path: file.relativePath,
   })
-  
+
   return file
 }
 
@@ -181,50 +117,40 @@ export async function createFile(input: CreateFileInput): Promise<TranslationFil
  */
 export async function upsertFile(input: CreateFileInput): Promise<TranslationFile> {
   const db = getDatabase()
-  
+
   const contentHash = computeHash(input.content)
   const fileSize = Buffer.byteLength(input.content, 'utf8')
   const format = input.format || detectFormat(input.fileName)
-  
-  const rows = await db`
-    INSERT INTO files (
-      session_id,
-      job_id,
-      file_type,
-      content_type,
+
+  const [file] = await db
+    .insert(files)
+    .values({
+      sessionId: input.sessionId,
+      jobId: input.jobId,
+      fileType: input.fileType,
+      contentType: input.contentType,
       format,
-      locale,
-      relative_path,
-      file_name,
-      content,
-      content_hash,
-      file_size,
-      metadata
-    ) VALUES (
-      ${input.sessionId},
-      ${input.jobId || null},
-      ${input.fileType},
-      ${input.contentType},
-      ${format},
-      ${input.locale},
-      ${input.relativePath},
-      ${input.fileName},
-      ${input.content},
-      ${contentHash},
-      ${fileSize},
-      ${JSON.stringify(input.metadata || {})}
-    )
-    ON CONFLICT (session_id, file_type, locale, relative_path)
-    DO UPDATE SET
-      content = EXCLUDED.content,
-      content_hash = EXCLUDED.content_hash,
-      file_size = EXCLUDED.file_size,
-      metadata = EXCLUDED.metadata,
-      job_id = COALESCE(EXCLUDED.job_id, files.job_id)
-    RETURNING *
-  `
-  
-  return mapRowToFile(rows[0])
+      locale: input.locale,
+      relativePath: input.relativePath,
+      fileName: input.fileName,
+      content: input.content,
+      contentHash,
+      fileSize,
+      metadata: input.metadata || {},
+    })
+    .onConflictDoUpdate({
+      target: [files.sessionId, files.fileType, files.locale, files.relativePath],
+      set: {
+        content: sql`EXCLUDED.content`,
+        contentHash: sql`EXCLUDED.content_hash`,
+        fileSize: sql`EXCLUDED.file_size`,
+        metadata: sql`EXCLUDED.metadata`,
+        jobId: sql`COALESCE(EXCLUDED.job_id, ${files.jobId})`,
+      },
+    })
+    .returning()
+
+  return file
 }
 
 /**
@@ -232,16 +158,10 @@ export async function upsertFile(input: CreateFileInput): Promise<TranslationFil
  */
 export async function getFileById(id: string): Promise<TranslationFile | null> {
   const db = getDatabase()
-  
-  const rows = await db`
-    SELECT * FROM files WHERE id = ${id}
-  `
-  
-  if (rows.length === 0) {
-    return null
-  }
-  
-  return mapRowToFile(rows[0])
+
+  const [file] = await db.select().from(files).where(eq(files.id, id)).limit(1)
+
+  return file || null
 }
 
 /**
@@ -254,52 +174,51 @@ export async function getFile(
   relativePath: string
 ): Promise<TranslationFile | null> {
   const db = getDatabase()
-  
-  const rows = await db`
-    SELECT * FROM files 
-    WHERE session_id = ${sessionId}
-    AND file_type = ${fileType}
-    AND locale = ${locale}
-    AND relative_path = ${relativePath}
-  `
-  
-  if (rows.length === 0) {
-    return null
-  }
-  
-  return mapRowToFile(rows[0])
+
+  const [file] = await db
+    .select()
+    .from(files)
+    .where(
+      and(
+        eq(files.sessionId, sessionId),
+        eq(files.fileType, fileType),
+        eq(files.locale, locale),
+        eq(files.relativePath, relativePath)
+      )
+    )
+    .limit(1)
+
+  return file || null
 }
 
 /**
  * Update a file
  */
-export async function updateFile(id: string, input: UpdateFileInput): Promise<TranslationFile | null> {
+export async function updateFile(
+  id: string,
+  input: UpdateFileInput
+): Promise<TranslationFile | null> {
   const db = getDatabase()
-  
-  let contentHash: string | undefined
-  let fileSize: number | undefined
-  
+
+  const updateData: Partial<NewFile> = {}
+
   if (input.content !== undefined) {
-    contentHash = computeHash(input.content)
-    fileSize = Buffer.byteLength(input.content, 'utf8')
+    updateData.content = input.content
+    updateData.contentHash = computeHash(input.content)
+    updateData.fileSize = Buffer.byteLength(input.content, 'utf8')
   }
-  
-  const rows = await db`
-    UPDATE files 
-    SET 
-      content = COALESCE(${input.content || null}, content),
-      content_hash = COALESCE(${contentHash || null}, content_hash),
-      file_size = COALESCE(${fileSize || null}, file_size),
-      metadata = COALESCE(${input.metadata ? JSON.stringify(input.metadata) : null}::jsonb, metadata)
-    WHERE id = ${id}
-    RETURNING *
-  `
-  
-  if (rows.length === 0) {
-    return null
+
+  if (input.metadata !== undefined) {
+    updateData.metadata = input.metadata
   }
-  
-  return mapRowToFile(rows[0])
+
+  const [file] = await db
+    .update(files)
+    .set(updateData)
+    .where(eq(files.id, id))
+    .returning()
+
+  return file || null
 }
 
 /**
@@ -307,42 +226,35 @@ export async function updateFile(id: string, input: UpdateFileInput): Promise<Tr
  */
 export async function deleteFile(id: string): Promise<boolean> {
   const db = getDatabase()
-  
-  const result = await db`
-    DELETE FROM files WHERE id = ${id}
-    RETURNING id
-  `
-  
+
+  const result = await db.delete(files).where(eq(files.id, id)).returning({ id: files.id })
+
   return result.length > 0
 }
 
 /**
  * Delete files by session
  */
-export async function deleteFilesBySession(sessionId: string, fileType?: FileType): Promise<number> {
+export async function deleteFilesBySession(
+  sessionId: string,
+  fileType?: FileType
+): Promise<number> {
   const db = getDatabase()
-  
-  let result: Record<string, unknown>[]
-  
+
+  const conditions = [eq(files.sessionId, sessionId)]
   if (fileType) {
-    result = await db`
-      DELETE FROM files 
-      WHERE session_id = ${sessionId}
-      AND file_type = ${fileType}
-      RETURNING id
-    `
-  } else {
-    result = await db`
-      DELETE FROM files 
-      WHERE session_id = ${sessionId}
-      RETURNING id
-    `
+    conditions.push(eq(files.fileType, fileType))
   }
-  
+
+  const result = await db
+    .delete(files)
+    .where(and(...conditions))
+    .returning({ id: files.id })
+
   if (result.length > 0) {
     log.info('Deleted files', { sessionId, fileType, count: result.length })
   }
-  
+
   return result.length
 }
 
@@ -353,57 +265,34 @@ export async function listFiles(filter: FileFilter = {}): Promise<TranslationFil
   const db = getDatabase()
   const limit = filter.limit || 100
   const offset = filter.offset || 0
-  
-  let rows: Record<string, unknown>[]
-  
-  if (filter.sessionId && filter.fileType && filter.locale) {
-    rows = await db`
-      SELECT * FROM files 
-      WHERE session_id = ${filter.sessionId}
-      AND file_type = ${filter.fileType}
-      AND locale = ${filter.locale}
-      ORDER BY relative_path ASC
-      LIMIT ${limit} OFFSET ${offset}
-    `
-  } else if (filter.sessionId && filter.fileType) {
-    rows = await db`
-      SELECT * FROM files 
-      WHERE session_id = ${filter.sessionId}
-      AND file_type = ${filter.fileType}
-      ORDER BY locale, relative_path ASC
-      LIMIT ${limit} OFFSET ${offset}
-    `
-  } else if (filter.sessionId && filter.locale) {
-    rows = await db`
-      SELECT * FROM files 
-      WHERE session_id = ${filter.sessionId}
-      AND locale = ${filter.locale}
-      ORDER BY file_type, relative_path ASC
-      LIMIT ${limit} OFFSET ${offset}
-    `
-  } else if (filter.sessionId) {
-    rows = await db`
-      SELECT * FROM files 
-      WHERE session_id = ${filter.sessionId}
-      ORDER BY file_type, locale, relative_path ASC
-      LIMIT ${limit} OFFSET ${offset}
-    `
-  } else if (filter.contentType) {
-    rows = await db`
-      SELECT * FROM files 
-      WHERE content_type = ${filter.contentType}
-      ORDER BY created_at DESC
-      LIMIT ${limit} OFFSET ${offset}
-    `
-  } else {
-    rows = await db`
-      SELECT * FROM files 
-      ORDER BY created_at DESC
-      LIMIT ${limit} OFFSET ${offset}
-    `
+
+  const conditions = []
+
+  if (filter.sessionId) {
+    conditions.push(eq(files.sessionId, filter.sessionId))
   }
-  
-  return rows.map(mapRowToFile)
+  if (filter.fileType) {
+    conditions.push(eq(files.fileType, filter.fileType))
+  }
+  if (filter.locale) {
+    conditions.push(eq(files.locale, filter.locale))
+  }
+  if (filter.contentType) {
+    conditions.push(eq(files.contentType, filter.contentType))
+  }
+
+  let query = db.select().from(files)
+
+  if (conditions.length > 0) {
+    query = query.where(and(...conditions)) as typeof query
+  }
+
+  // Order by relative path if filtering by session, otherwise by created_at
+  if (filter.sessionId) {
+    return query.orderBy(asc(files.relativePath)).limit(limit).offset(offset)
+  }
+
+  return query.orderBy(desc(files.createdAt)).limit(limit).offset(offset)
 }
 
 /**
@@ -413,11 +302,11 @@ export async function getFilesBySessionGrouped(
   sessionId: string,
   fileType: FileType
 ): Promise<Map<string, Map<ContentType, TranslationFile[]>>> {
-  const files = await listFiles({ sessionId, fileType, limit: 10000 })
-  
+  const fileList = await listFiles({ sessionId, fileType, limit: 10000 })
+
   const grouped = new Map<string, Map<ContentType, TranslationFile[]>>()
-  
-  for (const file of files) {
+
+  for (const file of fileList) {
     if (!grouped.has(file.locale)) {
       grouped.set(file.locale, new Map())
     }
@@ -427,35 +316,47 @@ export async function getFilesBySessionGrouped(
     }
     localeMap.get(file.contentType)!.push(file)
   }
-  
+
   return grouped
 }
 
 /**
  * Get upload files for a session
  */
-export async function getUploadFiles(sessionId: string, locale?: string): Promise<TranslationFile[]> {
+export async function getUploadFiles(
+  sessionId: string,
+  locale?: string
+): Promise<TranslationFile[]> {
   return listFiles({ sessionId, fileType: 'upload', locale, limit: 10000 })
 }
 
 /**
  * Get translation files for a session
  */
-export async function getTranslationFiles(sessionId: string, locale?: string): Promise<TranslationFile[]> {
+export async function getTranslationFiles(
+  sessionId: string,
+  locale?: string
+): Promise<TranslationFile[]> {
   return listFiles({ sessionId, fileType: 'translation', locale, limit: 10000 })
 }
 
 /**
  * Get delta files for a session
  */
-export async function getDeltaFiles(sessionId: string, locale?: string): Promise<TranslationFile[]> {
+export async function getDeltaFiles(
+  sessionId: string,
+  locale?: string
+): Promise<TranslationFile[]> {
   return listFiles({ sessionId, fileType: 'delta', locale, limit: 10000 })
 }
 
 /**
  * Get original files for a session (used in changes workflow)
  */
-export async function getOriginalFiles(sessionId: string, locale?: string): Promise<TranslationFile[]> {
+export async function getOriginalFiles(
+  sessionId: string,
+  locale?: string
+): Promise<TranslationFile[]> {
   return listFiles({ sessionId, fileType: 'original', locale, limit: 10000 })
 }
 
@@ -464,30 +365,25 @@ export async function getOriginalFiles(sessionId: string, locale?: string): Prom
  */
 export async function countFiles(filter: FileFilter = {}): Promise<number> {
   const db = getDatabase()
-  
-  let result: { count: string }[]
-  
-  if (filter.sessionId && filter.fileType) {
-    result = await db`
-      SELECT COUNT(*) as count FROM files 
-      WHERE session_id = ${filter.sessionId}
-      AND file_type = ${filter.fileType}
-    `
-  } else if (filter.sessionId) {
-    result = await db`
-      SELECT COUNT(*) as count FROM files 
-      WHERE session_id = ${filter.sessionId}
-    `
-  } else if (filter.fileType) {
-    result = await db`
-      SELECT COUNT(*) as count FROM files 
-      WHERE file_type = ${filter.fileType}
-    `
-  } else {
-    result = await db`SELECT COUNT(*) as count FROM files`
+
+  const conditions = []
+
+  if (filter.sessionId) {
+    conditions.push(eq(files.sessionId, filter.sessionId))
   }
-  
-  return parseInt(result[0].count, 10)
+  if (filter.fileType) {
+    conditions.push(eq(files.fileType, filter.fileType))
+  }
+
+  let query = db.select({ count: sql<number>`count(*)` }).from(files)
+
+  if (conditions.length > 0) {
+    query = query.where(and(...conditions)) as typeof query
+  }
+
+  const [result] = await query
+
+  return Number(result?.count || 0)
 }
 
 /**
@@ -495,36 +391,42 @@ export async function countFiles(filter: FileFilter = {}): Promise<number> {
  */
 export async function getFileStats(sessionId: string): Promise<FileStats> {
   const db = getDatabase()
-  
-  const countByType = await db`
-    SELECT file_type, COUNT(*) as count
-    FROM files
-    WHERE session_id = ${sessionId}
-    GROUP BY file_type
-  ` as { file_type: FileType; count: string }[]
-  
-  const countByContentType = await db`
-    SELECT content_type, COUNT(*) as count
-    FROM files
-    WHERE session_id = ${sessionId}
-    GROUP BY content_type
-  ` as { content_type: ContentType; count: string }[]
-  
-  const countByLocale = await db`
-    SELECT locale, COUNT(*) as count
-    FROM files
-    WHERE session_id = ${sessionId}
-    GROUP BY locale
-  ` as { locale: string; count: string }[]
-  
-  const totals = await db`
-    SELECT 
-      COUNT(*) as total_count,
-      COALESCE(SUM(file_size), 0) as total_size
-    FROM files
-    WHERE session_id = ${sessionId}
-  ` as { total_count: string; total_size: string }[]
-  
+
+  const countByType = await db
+    .select({
+      fileType: files.fileType,
+      count: sql<number>`count(*)`,
+    })
+    .from(files)
+    .where(eq(files.sessionId, sessionId))
+    .groupBy(files.fileType)
+
+  const countByContentType = await db
+    .select({
+      contentType: files.contentType,
+      count: sql<number>`count(*)`,
+    })
+    .from(files)
+    .where(eq(files.sessionId, sessionId))
+    .groupBy(files.contentType)
+
+  const countByLocale = await db
+    .select({
+      locale: files.locale,
+      count: sql<number>`count(*)`,
+    })
+    .from(files)
+    .where(eq(files.sessionId, sessionId))
+    .groupBy(files.locale)
+
+  const [totals] = await db
+    .select({
+      totalCount: sql<number>`count(*)`,
+      totalSize: sql<number>`COALESCE(SUM(${files.fileSize}), 0)`,
+    })
+    .from(files)
+    .where(eq(files.sessionId, sessionId))
+
   const byType: Record<FileType, number> = {
     upload: 0,
     translation: 0,
@@ -532,29 +434,29 @@ export async function getFileStats(sessionId: string): Promise<FileStats> {
     original: 0,
   }
   for (const row of countByType) {
-    byType[row.file_type] = parseInt(row.count, 10)
+    byType[row.fileType] = Number(row.count)
   }
-  
+
   const byContentType: Record<ContentType, number> = {
     content: 0,
     global: 0,
     page: 0,
   }
   for (const row of countByContentType) {
-    byContentType[row.content_type] = parseInt(row.count, 10)
+    byContentType[row.contentType] = Number(row.count)
   }
-  
+
   const byLocale: Record<string, number> = {}
   for (const row of countByLocale) {
-    byLocale[row.locale] = parseInt(row.count, 10)
+    byLocale[row.locale] = Number(row.count)
   }
-  
+
   return {
-    totalCount: parseInt(totals[0].total_count, 10),
+    totalCount: Number(totals?.totalCount || 0),
     byType,
     byContentType,
     byLocale,
-    totalSize: parseInt(totals[0].total_size, 10),
+    totalSize: Number(totals?.totalSize || 0),
   }
 }
 
@@ -569,11 +471,11 @@ export async function hasContentChanged(
   newContent: string
 ): Promise<boolean> {
   const existing = await getFile(sessionId, fileType, locale, relativePath)
-  
+
   if (!existing) {
     return true // New file
   }
-  
+
   const newHash = computeHash(newContent)
   return existing.contentHash !== newHash
 }
@@ -585,20 +487,20 @@ export async function bulkCreateFiles(inputs: CreateFileInput[]): Promise<Transl
   if (inputs.length === 0) {
     return []
   }
-  
+
   const results: TranslationFile[] = []
-  
+
   // Process in batches of 100
   const batchSize = 100
   for (let i = 0; i < inputs.length; i += batchSize) {
     const batch = inputs.slice(i, i + batchSize)
-    
+
     // Use upsert for each file
-    const promises = batch.map(input => upsertFile(input))
-    const files = await Promise.all(promises)
-    results.push(...files)
+    const promises = batch.map((input) => upsertFile(input))
+    const createdFiles = await Promise.all(promises)
+    results.push(...createdFiles)
   }
-  
+
   log.info('Bulk created files', { count: results.length })
   return results
 }
@@ -606,25 +508,22 @@ export async function bulkCreateFiles(inputs: CreateFileInput[]): Promise<Transl
 /**
  * Get locales with files for a session
  */
-export async function getLocalesForSession(sessionId: string, fileType?: FileType): Promise<string[]> {
+export async function getLocalesForSession(
+  sessionId: string,
+  fileType?: FileType
+): Promise<string[]> {
   const db = getDatabase()
-  
-  let rows: { locale: string }[]
-  
+
+  const conditions = [eq(files.sessionId, sessionId)]
   if (fileType) {
-    rows = await db`
-      SELECT DISTINCT locale FROM files
-      WHERE session_id = ${sessionId}
-      AND file_type = ${fileType}
-      ORDER BY locale
-    `
-  } else {
-    rows = await db`
-      SELECT DISTINCT locale FROM files
-      WHERE session_id = ${sessionId}
-      ORDER BY locale
-    `
+    conditions.push(eq(files.fileType, fileType))
   }
-  
-  return rows.map(r => r.locale)
+
+  const rows = await db
+    .selectDistinct({ locale: files.locale })
+    .from(files)
+    .where(and(...conditions))
+    .orderBy(files.locale)
+
+  return rows.map((r) => r.locale)
 }

@@ -1,28 +1,43 @@
 /**
- * PostgreSQL connection module using Bun's native SQL client
+ * PostgreSQL connection module using Drizzle ORM with Bun's native SQL client
  */
+import { drizzle } from 'drizzle-orm/bun-sql'
 import { SQL } from 'bun'
 import { getDatabaseConfig } from '../config/env'
 import { createScopedLogger } from '../utils/logger'
+import * as schema from './schema'
 
 const log = createScopedLogger('database:connection')
 
-let db: SQL | null = null
+let client: SQL | null = null
+let db: ReturnType<typeof drizzle<typeof schema>> | null = null
 let isConnected = false
 
 /**
- * Get the database connection instance
+ * Get the raw SQL client (for special cases)
+ */
+export function getSqlClient(): SQL {
+  if (!client) {
+    const config = getDatabaseConfig()
+    log.info('Initializing PostgreSQL connection', {
+      url: config.url.replace(/:[^:@]+@/, ':***@'), // Mask password in logs
+    })
+
+    client = new SQL(config.url)
+    isConnected = true
+  }
+  return client
+}
+
+/**
+ * Get the Drizzle database instance
  * Creates a new connection if one doesn't exist
  */
-export function getDatabase(): SQL {
+export function getDatabase() {
   if (!db) {
-    const config = getDatabaseConfig()
-    log.info('Initializing PostgreSQL connection', { 
-      url: config.url.replace(/:[^:@]+@/, ':***@') // Mask password in logs
-    })
-    
-    db = new SQL(config.url)
-    isConnected = true
+    const sqlClient = getSqlClient()
+    db = drizzle(sqlClient, { schema })
+    log.info('Drizzle ORM initialized')
   }
   return db
 }
@@ -31,51 +46,33 @@ export function getDatabase(): SQL {
  * Check if database is connected
  */
 export function isDatabaseConnected(): boolean {
-  return isConnected && db !== null
+  return isConnected && client !== null
 }
 
 /**
  * Close the database connection
  */
 export async function closeDatabase(): Promise<void> {
-  if (db) {
+  if (client) {
     log.info('Closing PostgreSQL connection')
-    await db.close()
+    await client.close()
+    client = null
     db = null
     isConnected = false
   }
 }
 
 /**
- * Execute a raw SQL query using tagged template literals
- * This is a convenience wrapper around the database connection
- */
-export async function query<T = Record<string, unknown>>(
-  strings: TemplateStringsArray,
-  ...values: unknown[]
-): Promise<T[]> {
-  const database = getDatabase()
-  return database(strings, ...values) as Promise<T[]>
-}
-
-/**
  * Execute a transaction with automatic rollback on error
  */
 export async function transaction<T>(
-  fn: (sql: SQL) => Promise<T>
+  fn: (tx: ReturnType<typeof getDatabase>) => Promise<T>
 ): Promise<T> {
   const database = getDatabase()
-  
-  try {
-    await database`BEGIN`
-    const result = await fn(database)
-    await database`COMMIT`
-    return result
-  } catch (error) {
-    await database`ROLLBACK`
-    log.error('Transaction failed, rolled back', { error })
-    throw error
-  }
+
+  return database.transaction(async (tx) => {
+    return fn(tx as unknown as ReturnType<typeof getDatabase>)
+  })
 }
 
 /**
@@ -83,30 +80,33 @@ export async function transaction<T>(
  * Should be called on application startup
  */
 export async function initializeDatabase(): Promise<void> {
-  const database = getDatabase()
-  
+  const sqlClient = getSqlClient()
+
   log.info('Checking database connection...')
-  
+
   try {
     // Simple connectivity test
-    const result = await database`SELECT 1 as connected`
+    const result = await sqlClient`SELECT 1 as connected`
     if (result[0]?.connected === 1) {
       log.info('Database connection established')
     }
-    
+
     // Check if schema is initialized by looking for sessions table
-    const tables = await database`
+    const tables = await sqlClient`
       SELECT table_name 
       FROM information_schema.tables 
       WHERE table_schema = 'public' 
       AND table_name = 'sessions'
     `
-    
+
     if (tables.length === 0) {
-      log.warn('Database schema not initialized. Please run the schema.sql migration.')
+      log.warn('Database schema not initialized. Please run: bun run db:migrate')
     } else {
       log.info('Database schema is initialized')
     }
+
+    // Initialize Drizzle
+    getDatabase()
   } catch (error) {
     log.error('Failed to connect to database', { error })
     throw error
@@ -116,24 +116,31 @@ export async function initializeDatabase(): Promise<void> {
 /**
  * Health check for the database connection
  */
-export async function healthCheck(): Promise<{ healthy: boolean; latencyMs: number; error?: string }> {
+export async function healthCheck(): Promise<{
+  healthy: boolean
+  latencyMs: number
+  error?: string
+}> {
   const start = performance.now()
-  
+
   try {
-    const database = getDatabase()
-    await database`SELECT 1`
+    const sqlClient = getSqlClient()
+    await sqlClient`SELECT 1`
     const latencyMs = performance.now() - start
-    
+
     return { healthy: true, latencyMs }
   } catch (error) {
     const latencyMs = performance.now() - start
-    return { 
-      healthy: false, 
-      latencyMs, 
-      error: error instanceof Error ? error.message : String(error) 
+    return {
+      healthy: false,
+      latencyMs,
+      error: error instanceof Error ? error.message : String(error),
     }
   }
 }
 
-// Export the SQL type for use in repositories
-export { SQL }
+// Re-export schema for convenience
+export { schema }
+
+// Export type for the database instance
+export type Database = ReturnType<typeof getDatabase>
