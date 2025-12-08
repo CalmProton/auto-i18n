@@ -1,0 +1,32 @@
+{
+  "env": {
+    "ANTHROPIC_BASE_URL": "https://api.deepseek.com/anthropic",
+    "ANTHROPIC_AUTH_TOKEN": "YOUR API KEY HERE",
+    "ANTHROPIC_MODEL": "deepseek-chat",
+    "ANTHROPIC_SMALL_FAST_MODEL": "deepseek-chat"
+  }
+}
+// {
+//   "env": {
+//     "ANTHROPIC_AUTH_TOKEN": "YOUR API KEY HERE",
+//     "ANTHROPIC_MODEL": "claude-sonnet-4-5-20250929",
+//     "ANTHROPIC_SMALL_FAST_MODEL": "claude-sonnet-4-5-20250929"
+//   }
+// }
+
+// {
+//   "env": {
+//     "ANTHROPIC_AUTH_TOKEN": "APIKEY",
+//     "ANTHROPIC_BASE_URL": "https://api.z.ai/api/anthropic",
+//     "API_TIMEOUT_MS": "3000000",
+//     "ANTHROPIC_MODEL": "glm-4.6",
+//     "ANTHROPIC_SMALL_FAST_MODEL": "glm-4.6",
+//     "ENABLE_THINKING": "true",
+//     "REASONING_EFFORT": "ultrathink",
+//     "MAX_THINKING_TOKENS": "32000",
+//     "ENABLE_STREAMING": "true",
+//     "MAX_OUTPUT_TOKENS": "96000",
+//     "MAX_MCP_OUTPUT_TOKENS": "64000",
+//     "AUTH_HEADER_MODE": "x-api-key"
+//   }
+// }

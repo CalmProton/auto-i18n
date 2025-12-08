@@ -7,3 +7,4 @@ TODO.md
 
 # client build
 client/dist
+.claude/settings.json
