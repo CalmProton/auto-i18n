@@ -1,7 +1,7 @@
 import { mkdir, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { createScopedLogger } from '../../utils/logger'
-import { tempRoot } from '../../utils/fileStorage'
+import { getTempRoot } from '../../utils/fileStorage'
 import type { ProcessedTranslation } from './batchOutputProcessor'
 
 const log = createScopedLogger('translation:translationFormatter')
@@ -61,7 +61,7 @@ export async function saveTranslatedFile(
   const sanitizedSender = sanitizeSegment(senderId)
   
   // Build path: tmp/{senderId}/translations/{targetLocale}/{type}/{relativePath}
-  const translationsRoot = join(tempRoot, sanitizedSender, 'translations')
+  const translationsRoot = join(getTempRoot(), sanitizedSender, 'translations')
   const localePath = join(translationsRoot, translation.targetLocale, translation.type)
   
   // Handle relative path - split and join to normalize

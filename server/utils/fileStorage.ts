@@ -18,6 +18,15 @@ type SaveFileOptions = SavePathOptions & {
 
 const DEFAULT_TEMP_ROOT = join(process.cwd(), 'tmp')
 
+/**
+ * Get the temporary root directory.
+ * This is a function (not a constant) to allow tests to override via environment variables.
+ */
+export function getTempRoot(): string {
+  return process.env.AUTO_I18N_TEMP_DIR ?? DEFAULT_TEMP_ROOT
+}
+
+// Deprecated: Use getTempRoot() instead. Kept for backwards compatibility.
 export const tempRoot = process.env.AUTO_I18N_TEMP_DIR ?? DEFAULT_TEMP_ROOT
 
 const DEFAULT_CATEGORY: StorageCategory = 'uploads'
@@ -35,7 +44,7 @@ function ensureDirectory(path: string) {
 function resolveBaseDirectory({ senderId, locale, type, category }: SavePathOptions): string {
   const sanitizedCategory = sanitizeSegment((category ?? DEFAULT_CATEGORY) as string)
   return join(
-    tempRoot,
+    getTempRoot(),
     sanitizeSegment(senderId),
     sanitizedCategory,
     sanitizeSegment(locale),

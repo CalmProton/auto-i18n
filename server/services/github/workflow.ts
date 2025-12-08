@@ -14,7 +14,7 @@ import type {
 import { GitHubClient, type GitCommit } from './client'
 import { createScopedLogger } from '../../utils/logger'
 import { loadMetadata, updateMetadata } from '../../utils/jobMetadata'
-import { tempRoot } from '../../utils/fileStorage'
+import { getTempRoot } from '../../utils/fileStorage'
 
 const log = createScopedLogger('services:github:workflow')
 
@@ -55,7 +55,7 @@ function sanitizeSegment(segment: string): string {
 function resolveTempFilePath(senderId: string, segments: string[]): string {
   const sanitizedSender = sanitizeSegment(senderId)
   const flattened = segments.flatMap((segment) => splitPath(segment))
-  return pathJoin(tempRoot, sanitizedSender, ...flattened)
+  return pathJoin(getTempRoot(), sanitizedSender, ...flattened)
 }
 
 function splitPath(value: string): string[] {

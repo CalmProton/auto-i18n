@@ -123,7 +123,7 @@ describe('Job Metadata Utils', () => {
         jobs: [
           {
             id: 'new-job',
-            files: [],
+            files: [{ relativePath: 'test.md', type: 'content' }],
           },
         ],
       }
@@ -143,7 +143,7 @@ describe('Job Metadata Utils', () => {
         jobs: [
           {
             id: 'job-1',
-            files: [],
+            files: [{ relativePath: 'file1.md', type: 'content' }],
           },
         ],
         createdAt: new Date().toISOString(),
@@ -156,7 +156,7 @@ describe('Job Metadata Utils', () => {
         jobs: [
           {
             id: 'job-2',
-            files: [],
+            files: [{ relativePath: 'file2.md', type: 'content' }],
           },
         ],
       }

@@ -2,7 +2,7 @@ import { mkdir, readFile, writeFile, rm, readdir } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import type { ChangeSessionMetadata, ChangeStatus } from '../types'
-import { tempRoot } from './fileStorage'
+import { getTempRoot } from './fileStorage'
 import { createScopedLogger } from './logger'
 
 const log = createScopedLogger('utils:changeStorage')
@@ -14,7 +14,7 @@ function sanitizeSegment(segment: string): string {
 }
 
 export function getChangeSessionPath(sessionId: string): string {
-  return join(tempRoot, sanitizeSegment(sessionId), CHANGES_DIR)
+  return join(getTempRoot(), sanitizeSegment(sessionId), CHANGES_DIR)
 }
 
 export function getChangeMetadataPath(sessionId: string): string {
@@ -26,11 +26,11 @@ export function getChangeOriginalFilesPath(sessionId: string): string {
 }
 
 export function getChangeDeltaPath(sessionId: string, locale: string): string {
-  return join(tempRoot, sanitizeSegment(sessionId), 'deltas', locale)
+  return join(getTempRoot(), sanitizeSegment(sessionId), 'deltas', locale)
 }
 
 export function getChangeDeltasPath(sessionId: string): string {
-  return join(tempRoot, sanitizeSegment(sessionId), 'deltas')
+  return join(getTempRoot(), sanitizeSegment(sessionId), 'deltas')
 }
 
 /**
@@ -145,6 +145,7 @@ export async function addChangeSessionError(
  * List all change sessions
  */
 export async function listChangeSessions(): Promise<ChangeSessionMetadata[]> {
+  const tempRoot = getTempRoot()
   if (!existsSync(tempRoot)) {
     return []
   }
@@ -186,7 +187,7 @@ export async function listChangeSessions(): Promise<ChangeSessionMetadata[]> {
  * Delete change session
  */
 export async function deleteChangeSession(sessionId: string): Promise<boolean> {
-  const sessionPath = join(tempRoot, sanitizeSegment(sessionId))
+  const sessionPath = join(getTempRoot(), sanitizeSegment(sessionId))
   
   if (!existsSync(sessionPath)) {
     log.warn('Change session not found for deletion', { sessionId, sessionPath })

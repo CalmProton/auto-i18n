@@ -24,10 +24,14 @@ import { getTranslationConfig } from '../config/env'
 import { getGitHubConfig } from '../config/github'
 import { createScopedLogger } from './logger'
 import { readFileSync } from 'node:fs'
+import { getTempRoot } from './fileStorage'
 
 const log = createScopedLogger('utils:dashboard')
 
-const TMP_DIR = join(process.cwd(), 'tmp')
+// Use getTempRoot() for dynamic resolution, but cache for consistency within a request
+function getTmpDir(): string {
+  return getTempRoot()
+}
 
 /**
  * Helper function to read and parse JSON file
@@ -47,11 +51,11 @@ function readJsonFile<T>(filePath: string): T | null {
  */
 export function listAllSenderIds(): string[] {
   try {
-    if (!existsSync(TMP_DIR)) {
+    if (!existsSync(getTmpDir())) {
       return []
     }
 
-    return readdirSync(TMP_DIR, { withFileTypes: true })
+    return readdirSync(getTmpDir(), { withFileTypes: true })
       .filter((dirent) => dirent.isDirectory() && dirent.name !== 'logs')
       .map((dirent) => dirent.name)
   } catch (error) {
@@ -111,7 +115,7 @@ function countFilesRecursive(dir: string): number {
  */
 export function getUploadInfo(senderId: string): Upload | null {
   try {
-    const senderDir = join(TMP_DIR, senderId)
+    const senderDir = join(getTmpDir(), senderId)
     if (!existsSync(senderDir)) {
       return null
     }
@@ -341,7 +345,7 @@ export function listAllBatchIds(): Array<{ senderId: string; batchId: string }> 
   const batches: Array<{ senderId: string; batchId: string }> = []
 
   for (const senderId of senderIds) {
-    const batchesDir = join(TMP_DIR, senderId, 'batches')
+    const batchesDir = join(getTmpDir(), senderId, 'batches')
     if (!existsSync(batchesDir)) {
       continue
     }
@@ -361,7 +365,7 @@ export function listAllBatchIds(): Array<{ senderId: string; batchId: string }> 
  */
 export function getBatchInfo(senderId: string, batchId: string): Batch | null {
   try {
-    const batchDir = join(TMP_DIR, senderId, 'batches', batchId)
+    const batchDir = join(getTmpDir(), senderId, 'batches', batchId)
     if (!existsSync(batchDir)) {
       return null
     }
@@ -427,8 +431,8 @@ export function getBatchInfo(senderId: string, batchId: string): Batch | null {
 
     // Get repository name from sender metadata
     // Try change session metadata first, then fall back to regular upload metadata
-    const changeMetadataPath = join(TMP_DIR, senderId, 'changes', 'metadata.json')
-    const uploadMetadataPath = join(TMP_DIR, senderId, 'metadata.json')
+    const changeMetadataPath = join(getTmpDir(), senderId, 'changes', 'metadata.json')
+    const uploadMetadataPath = join(getTmpDir(), senderId, 'metadata.json')
     
     let metadata: TranslationMetadataFile | null = null
     if (existsSync(changeMetadataPath)) {
@@ -510,7 +514,7 @@ export function listAllBatches(): Batch[] {
  */
 export function getTranslationStatus(senderId: string): TranslationSession | null {
   try {
-    const senderDir = join(TMP_DIR, senderId)
+    const senderDir = join(getTmpDir(), senderId)
     if (!existsSync(senderDir)) {
       return null
     }
@@ -649,8 +653,8 @@ export function isReadyForGitHub(senderId: string): GitHubSession | null {
     }
 
     // Get metadata (check both paths)
-    const regularMetadataPath = join(TMP_DIR, senderId, 'metadata.json')
-    const changesMetadataPath = join(TMP_DIR, senderId, 'changes', 'metadata.json')
+    const regularMetadataPath = join(getTmpDir(), senderId, 'metadata.json')
+    const changesMetadataPath = join(getTmpDir(), senderId, 'changes', 'metadata.json')
     
     let metadata: any = null
     let sessionType: 'full-upload' | 'change-session' = 'full-upload'
@@ -746,7 +750,7 @@ export function getSystemStats(): SystemStats {
       }
       return size
     }
-    tmpSize = calculateDirSize(TMP_DIR)
+    tmpSize = calculateDirSize(getTmpDir())
   } catch (error) {
     log.error('Error calculating tmp directory size:', error)
   }
@@ -809,7 +813,7 @@ export function getDashboardOverview() {
   // Count total translation files across all sessions
   let totalTranslationFiles = 0
   for (const senderId of listAllSenderIds()) {
-    const translationsDir = join(TMP_DIR, senderId, 'translations')
+    const translationsDir = join(getTmpDir(), senderId, 'translations')
     if (existsSync(translationsDir)) {
       const locales = readdirSync(translationsDir, { withFileTypes: true })
         .filter((d) => d.isDirectory())
@@ -847,7 +851,7 @@ export function getDashboardOverview() {
  * Delete an upload session and all associated data
  */
 export function deleteUploadSession(senderId: string): void {
-  const senderDir = join(TMP_DIR, senderId)
+  const senderDir = join(getTmpDir(), senderId)
   if (existsSync(senderDir)) {
     rmSync(senderDir, { recursive: true, force: true })
   }
@@ -857,7 +861,7 @@ export function deleteUploadSession(senderId: string): void {
  * Delete a batch
  */
 export function deleteBatch(senderId: string, batchId: string): void {
-  const batchDir = join(TMP_DIR, senderId, 'batches', batchId)
+  const batchDir = join(getTmpDir(), senderId, 'batches', batchId)
   if (existsSync(batchDir)) {
     rmSync(batchDir, { recursive: true, force: true })
   }

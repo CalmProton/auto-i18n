@@ -6,7 +6,7 @@ import type {
   TranslationMetadataFile,
   TranslationMetadataUpdate
 } from '../types'
-import { tempRoot } from './fileStorage'
+import { getTempRoot } from './fileStorage'
 import { createScopedLogger } from './logger'
 
 const log = createScopedLogger('utils:jobMetadata')
@@ -17,7 +17,7 @@ function sanitizeSegment(segment: string): string {
 }
 
 export function getMetadataPath(senderId: string): string {
-  return join(tempRoot, sanitizeSegment(senderId), METADATA_FILE_NAME)
+  return join(getTempRoot(), sanitizeSegment(senderId), METADATA_FILE_NAME)
 }
 
 function createEmptyMetadata(senderId: string): TranslationMetadataFile {

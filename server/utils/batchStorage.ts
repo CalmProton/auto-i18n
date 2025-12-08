@@ -1,6 +1,6 @@
 import { mkdirSync, existsSync, writeFileSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { tempRoot } from './fileStorage'
+import { getTempRoot } from './fileStorage'
 
 export function sanitizeBatchSegment(segment: string): string {
   return segment.replace(/[^a-zA-Z0-9._-]/g, '_')
@@ -14,7 +14,7 @@ function ensureDirectory(path: string): void {
 
 function resolveSenderBatchRoot(senderId: string): string {
   const sanitizedSender = sanitizeBatchSegment(senderId)
-  return join(tempRoot, sanitizedSender, 'batches')
+  return join(getTempRoot(), sanitizedSender, 'batches')
 }
 
 function resolveBatchDirectory(senderId: string, batchId: string): string {

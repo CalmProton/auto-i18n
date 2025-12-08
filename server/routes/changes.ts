@@ -665,8 +665,8 @@ changesRoutes.post('/:sessionId/reset', async ({ params, query, set }) => {
       
       const { existsSync, readdirSync, readFileSync } = await import('node:fs')
       const { join } = await import('node:path')
-      const { tempRoot } = await import('../utils/fileStorage')
-      const batchesPath = join(tempRoot, sessionId, 'batches')
+      const { getTempRoot } = await import('../utils/fileStorage')
+      const batchesPath = join(getTempRoot(), sessionId, 'batches')
       
       if (existsSync(batchesPath)) {
         try {
