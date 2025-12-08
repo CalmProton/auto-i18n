@@ -155,6 +155,7 @@ export async function cacheGet<T = string>(key: string, parseJson = false): Prom
 
 /**
  * Set a cached value with optional TTL
+ * Uses atomic SET with EX for TTL to avoid race conditions
  */
 export async function cacheSet(
   key: string, 
@@ -164,9 +165,11 @@ export async function cacheSet(
   const client = getRedis()
   const stringValue = typeof value === 'string' ? value : JSON.stringify(value)
   
-  await client.set(key, stringValue)
   if (ttlSeconds > 0) {
-    await client.expire(key, ttlSeconds)
+    // Use SET with EX atomically
+    await client.send('SET', [key, stringValue, 'EX', String(ttlSeconds)])
+  } else {
+    await client.set(key, stringValue)
   }
 }
 
@@ -209,6 +212,28 @@ export async function cacheDelPattern(pattern: string): Promise<number> {
 export async function cacheExists(key: string): Promise<boolean> {
   const client = getRedis()
   return await client.exists(key)
+}
+
+/**
+ * Set a key only if it doesn't exist (atomic operation for locks)
+ * Returns true if the key was set, false if it already existed
+ */
+export async function cacheSetNX(
+  key: string,
+  value: string | object,
+  ttlSeconds?: number
+): Promise<boolean> {
+  const client = getRedis()
+  const stringValue = typeof value === 'string' ? value : JSON.stringify(value)
+  
+  // Use SET with NX (only set if not exists) and optional EX (expire)
+  const args = [key, stringValue, 'NX']
+  if (ttlSeconds && ttlSeconds > 0) {
+    args.push('EX', String(ttlSeconds))
+  }
+  
+  const result = await client.send('SET', args)
+  return result === 'OK'
 }
 
 /**

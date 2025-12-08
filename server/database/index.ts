@@ -26,10 +26,10 @@ export {
   // Cache utilities
   cacheGet,
   cacheSet,
+  cacheSetNX,
   cacheDel,
   cacheDelPattern,
   cacheExists,
-  cacheIncr,
   // Pub/Sub utilities
   publish,
   subscribe,

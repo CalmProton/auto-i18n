@@ -5,10 +5,10 @@
  */
 import { 
   cacheGet, 
-  cacheSet, 
+  cacheSet,
+  cacheSetNX,
   cacheDel, 
   cacheDelPattern, 
-  cacheExists,
   publish,
   subscribe,
   type MessageHandler
@@ -200,20 +200,14 @@ export async function invalidateBatchCache(batchId: string): Promise<void> {
 // ============================================================================
 
 /**
- * Acquire a distributed lock
+ * Acquire a distributed lock atomically
  * Returns true if lock was acquired, false otherwise
+ * Uses SETNX to avoid race conditions
  */
 export async function acquireLock(resource: string, ttlSeconds: number = CacheTTL.lock): Promise<boolean> {
   const key = CacheKeys.lock(resource)
-  const exists = await cacheExists(key)
-  
-  if (exists) {
-    return false
-  }
-  
-  // Set the lock with expiration
-  await cacheSet(key, { lockedAt: new Date().toISOString() }, ttlSeconds)
-  return true
+  // Use atomic SETNX operation - only sets if key doesn't exist
+  return await cacheSetNX(key, { lockedAt: new Date().toISOString() }, ttlSeconds)
 }
 
 /**

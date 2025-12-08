@@ -228,66 +228,15 @@ export async function getSessionById(id: string): Promise<Session | null> {
  * Update a session
  */
 export async function updateSession(senderId: string, input: UpdateSessionInput): Promise<Session | null> {
-  const db = getDatabase()
-  
-  // Build dynamic update query
-  const updates: string[] = []
-  const values: unknown[] = []
-  
-  if (input.status !== undefined) {
-    values.push(input.status)
-    updates.push(`status = $${values.length}`)
-  }
-  if (input.targetLocales !== undefined) {
-    values.push(input.targetLocales)
-    updates.push(`target_locales = $${values.length}`)
-  }
-  if (input.repositoryOwner !== undefined) {
-    values.push(input.repositoryOwner)
-    updates.push(`repository_owner = $${values.length}`)
-  }
-  if (input.repositoryName !== undefined) {
-    values.push(input.repositoryName)
-    updates.push(`repository_name = $${values.length}`)
-  }
-  if (input.baseBranch !== undefined) {
-    values.push(input.baseBranch)
-    updates.push(`base_branch = $${values.length}`)
-  }
-  if (input.baseCommitSha !== undefined) {
-    values.push(input.baseCommitSha)
-    updates.push(`base_commit_sha = $${values.length}`)
-  }
-  if (input.commitSha !== undefined) {
-    values.push(input.commitSha)
-    updates.push(`commit_sha = $${values.length}`)
-  }
-  if (input.commitMessage !== undefined) {
-    values.push(input.commitMessage)
-    updates.push(`commit_message = $${values.length}`)
-  }
-  if (input.commitAuthor !== undefined) {
-    values.push(input.commitAuthor)
-    updates.push(`commit_author = $${values.length}`)
-  }
-  if (input.commitTimestamp !== undefined) {
-    values.push(input.commitTimestamp)
-    updates.push(`commit_timestamp = $${values.length}`)
-  }
-  if (input.expiresAt !== undefined) {
-    values.push(input.expiresAt)
-    updates.push(`expires_at = $${values.length}`)
-  }
-  if (input.metadata !== undefined) {
-    values.push(JSON.stringify(input.metadata))
-    updates.push(`metadata = $${values.length}`)
-  }
-  
-  if (updates.length === 0) {
+  // Check if there's anything to update
+  const hasUpdates = Object.keys(input).length > 0
+  if (!hasUpdates) {
     return getSessionBySenderId(senderId)
   }
   
-  // Use tagged template for the update
+  const db = getDatabase()
+  
+  // Use tagged template with COALESCE for partial updates
   const rows = await db`
     UPDATE sessions 
     SET 
