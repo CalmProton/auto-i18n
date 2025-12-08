@@ -62,6 +62,3 @@ async function runMigration() {
 }
 
 runMigration()
-
-// Run migration
-runMigration()

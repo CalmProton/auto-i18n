@@ -1,6 +1,7 @@
 /**
  * Drizzle ORM Schema
- * Maps to the existing PostgreSQL schema in schema.sql
+ * Defines the PostgreSQL database schema using Drizzle ORM.
+ * Migrations are generated via `bun run db:generate` and applied via `bun run db:migrate`.
  */
 import {
   pgTable,

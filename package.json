@@ -10,7 +10,7 @@
     "client:build": "vite build",
     "client:preview": "vite preview",
     "db:generate": "bunx drizzle-kit generate",
-    "db:migrate": "bun run server/database/migrate.ts",
+    "db:migrate": "bunx drizzle-kit migrate",
     "db:push": "bunx drizzle-kit push",
     "db:studio": "bunx drizzle-kit studio",
     "docker:up": "docker-compose up -d",
