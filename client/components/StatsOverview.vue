@@ -1,9 +1,5 @@
 <template>
   <Card>
-    <CardHeader>
-      <CardTitle>System Overview</CardTitle>
-      <CardDescription>Real-time statistics across your translation pipeline</CardDescription>
-    </CardHeader>
     <CardContent>
       <div v-if="loading" class="flex items-center justify-center py-8">
         <Spinner class="h-8 w-8" />
@@ -16,7 +12,7 @@
         </Alert>
       </div>
       
-      <div v-else class="grid grid-cols-2 md:grid-cols-4 gap-4">
+      <div v-else class="grid grid-cols-5 md:grid-cols-5 gap-4">
         <!-- Uploads Stat -->
         <div class="space-y-2">
           <p class="text-sm font-medium text-muted-foreground flex items-center gap-2">
@@ -86,7 +82,7 @@ import {
   RefreshCw,
   AlertCircle
 } from 'lucide-vue-next'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Spinner } from '@/components/ui/spinner'
