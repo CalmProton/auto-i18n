@@ -1,51 +1,34 @@
-# Use official Bun image
-FROM oven/bun:1.3.0-alpine AS base
+FROM oven/bun:latest
 
-# Install dependencies for building native modules and curl for healthcheck
-RUN apk add --no-cache \
-    python3 \
-    make \
-    g++ \
-    curl
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
-# Install dependencies (cached layer)
-FROM base AS dependencies
+# Copy package files first for better layer caching
+COPY package.json bun.lock* ./
 
-COPY package.json bun.lockb ./
-RUN bun install --frozen-lockfile --production
-
-# Copy dev dependencies for building frontend
-FROM base AS build-deps
-COPY package.json bun.lockb ./
-RUN bun install --frozen-lockfile
-
-# Build frontend
-FROM build-deps AS build
-COPY . .
-RUN bun run client:build
-
-# Production image
-FROM base AS production
-
-# Copy dependencies from dependencies stage
-COPY --from=dependencies /app/node_modules ./node_modules
-
-# Copy built frontend from build stage
-COPY --from=build /app/client/dist ./client/dist
+# Install all dependencies (including devDependencies for frontend build)
+RUN bun install
 
 # Copy application code
 COPY . .
 
+# Build the Vue client
+RUN bun run client:build
+
+# Remove devDependencies after build
+RUN bun install --production
+
 # Create tmp directory for runtime data
 RUN mkdir -p /app/tmp/logs
 
-# Expose ports
-EXPOSE 3000 5173
-
-# Set environment
+# Set production environment
 ENV NODE_ENV=production
 
-# Start the application
-CMD ["bun", "run", "server/index.ts"]
+# Default port (configurable via PORT env var)
+EXPOSE 3000
+
+CMD ["bun", "start"]
