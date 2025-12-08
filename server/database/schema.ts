@@ -387,6 +387,42 @@ export const apiRequestLogs = pgTable('api_request_logs', {
 ])
 
 // ============================================================================
+// SYSTEM_CONFIG TABLE - Stores system-wide configuration (translation settings, etc.)
+// ============================================================================
+
+export const systemConfig = pgTable('system_config', {
+  id: uuid('id').primaryKey().defaultRandom(),
+
+  // Configuration key (unique identifier)
+  key: varchar('key', { length: 255 }).notNull().unique(),
+
+  // Configuration value (stored as JSONB for flexibility)
+  value: jsonb('value').notNull().$type<unknown>(),
+
+  // Encrypted value for sensitive data (API keys)
+  encryptedValue: text('encrypted_value'),
+
+  // Masked preview of sensitive value (last 5 chars visible)
+  maskedPreview: varchar('masked_preview', { length: 50 }),
+
+  // Description of the configuration
+  description: text('description'),
+
+  // Whether this is a sensitive value (API keys, secrets)
+  isSensitive: varchar('is_sensitive', { length: 5 }).notNull().default('false'),
+
+  // Timestamps
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  index('idx_system_config_key').on(table.key),
+])
+
+// Type exports for system config
+export type SystemConfig = typeof systemConfig.$inferSelect
+export type NewSystemConfig = typeof systemConfig.$inferInsert
+
+// ============================================================================
 // RELATIONS
 // ============================================================================
 

@@ -5,6 +5,7 @@ import type { TranslationProviderAdapter, MarkdownTranslationInput, JsonTranslat
 import { OpenAIProvider } from './providers/openaiProvider'
 import { DeepseekProvider } from './providers/deepseekProvider'
 import { AnthropicProvider } from './providers/anthropicProvider'
+import { OpenRouterProvider } from './providers/openrouterProvider'
 import { MockProvider } from './providers/mockProvider'
 
 class NoOpTranslationProvider implements TranslationProviderAdapter {
@@ -69,6 +70,9 @@ function createProvider(forceMock = false): TranslationProviderAdapter {
     }
     if (config.provider === 'deepseek') {
       return new DeepseekProvider(config.providerConfig)
+    }
+    if (config.provider === 'openrouter') {
+      return new OpenRouterProvider(config.providerConfig)
     }
 
     return new NoOpTranslationProvider()

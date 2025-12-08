@@ -6,6 +6,7 @@ import githubRoutes from './github'
 import batchRoutes from './batch'
 import dashboardRoutes from './dashboard'
 import changesRoutes from './changes'
+import configRoutes from './config'
 import { pipelineRoutes } from './pipeline'
 import { sseRoutes } from './sse'
 
@@ -19,6 +20,7 @@ routes.use(batchRoutes)
 routes.use(githubRoutes)
 routes.use(dashboardRoutes)
 routes.use(changesRoutes)
+routes.use(configRoutes)
 routes.use(pipelineRoutes)
 routes.use(sseRoutes)
 

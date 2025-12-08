@@ -59,7 +59,7 @@
     <!-- Tabs Navigation -->
     <div class="container mx-auto px-6">
       <Tabs v-model="activeTab" class="w-full">
-        <TabsList class="grid w-full grid-cols-5">
+        <TabsList class="grid w-full grid-cols-6">
           <TabsTrigger value="pipeline" class="flex items-center gap-2">
             <Workflow class="h-4 w-4" />
             <span>Pipeline</span>
@@ -79,6 +79,10 @@
           <TabsTrigger value="git" class="flex items-center gap-2">
             <GitBranch class="h-4 w-4" />
             <span>Git</span>
+          </TabsTrigger>
+          <TabsTrigger value="settings" class="flex items-center gap-2">
+            <Settings class="h-4 w-4" />
+            <span>Settings</span>
           </TabsTrigger>
         </TabsList>
       </Tabs>
@@ -102,7 +106,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, watch } from 'vue'
 import { useAuth, useKeyboardShortcuts, usePipelineEvents } from '@/composables'
-import { Languages, Upload, Timer, GitBranch, Keyboard, LogOut, Workflow, TestTube } from 'lucide-vue-next'
+import { Languages, Upload, Timer, GitBranch, Keyboard, LogOut, Workflow, TestTube, Settings } from 'lucide-vue-next'
 import { Button } from '@/components/ui/button'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
@@ -114,6 +118,7 @@ import UploadsTab from './UploadsTab.vue'
 import BatchesTab from './BatchesTab.vue'
 import TranslationsTab from './TranslationsTab.vue'
 import GitTab from './GitTab.vue'
+import SettingsTab from './SettingsTab.vue'
 import ToastContainer from './ToastContainer.vue'
 import KeyboardShortcutsHelp from './KeyboardShortcutsHelp.vue'
 
@@ -123,7 +128,7 @@ const activeTab = ref('pipeline')
 const helpModal = ref<InstanceType<typeof KeyboardShortcutsHelp> | null>(null)
 
 // Valid tab names
-const validTabs = ['pipeline', 'uploads', 'batches', 'translations', 'git'] as const
+const validTabs = ['pipeline', 'uploads', 'batches', 'translations', 'git', 'settings'] as const
 type TabName = typeof validTabs[number]
 
 // Initialize tab from URL on mount
@@ -190,6 +195,12 @@ useKeyboardShortcuts([
     alt: true,
     description: 'Go to Git tab',
     handler: () => activeTab.value = 'git'
+  },
+  {
+    key: '6',
+    alt: true,
+    description: 'Go to Settings tab',
+    handler: () => activeTab.value = 'settings'
   }
 ])
 
@@ -205,6 +216,8 @@ const currentTabComponent = computed(() => {
       return TranslationsTab
     case 'git':
       return GitTab
+    case 'settings':
+      return SettingsTab
     default:
       return PipelineTab
   }

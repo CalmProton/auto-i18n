@@ -9,6 +9,7 @@ import { initializeAll, closeAll, healthCheckAll } from './database'
 import { startAllWorkers, stopAllWorkers } from './queues/workers'
 import { scheduleCleanupJob, closeAllQueues } from './queues'
 import { createScopedLogger } from './utils/logger'
+import { markDatabaseInitialized } from './config/env'
 
 const log = createScopedLogger('server')
 
@@ -22,6 +23,10 @@ async function initializeServer() {
     log.info('Initializing database connections...')
     await initializeAll()
     dbInitialized = true
+    
+    // Mark database as ready for config lookups
+    markDatabaseInitialized()
+    
     log.info('Database connections initialized')
     
     // Start queue workers

@@ -6,7 +6,7 @@
 export type UploadStatus = 'uploaded' | 'batched' | 'translating' | 'completed'
 export type BatchStatus = 'pending' | 'submitted' | 'processing' | 'completed' | 'failed' | 'cancelled' | 'partially_failed'
 export type JobType = 'openai-batch' | 'regular-translation'
-export type TranslationProvider = 'openai' | 'anthropic' | 'deepseek'
+export type TranslationProvider = 'openai' | 'anthropic' | 'deepseek' | 'openrouter'
 export type SessionType = 'full-upload' | 'change-session'
 export type PipelineStatus = 'uploaded' | 'batch-created' | 'submitted' | 'processing' | 'completed' | 'failed' | 'pr-created'
 export type AutomationMode = 'auto' | 'manual'
@@ -369,4 +369,67 @@ export interface ChangeSession {
 export interface ChangesResponse {
   changes: ChangeSession[]
   pagination: Pagination
+}
+
+// ============================================================================
+// CONFIG TYPES
+// ============================================================================
+
+export interface ConfigValue {
+  key: string
+  value: unknown
+  isSensitive: boolean
+  maskedPreview?: string
+  updatedAt: string
+}
+
+export interface ModelInfo {
+  id: string
+  name: string
+  provider: string
+  contextLength?: number
+  description?: string
+  pricing?: {
+    prompt?: string
+    completion?: string
+  }
+}
+
+export interface ConfigStatus {
+  mockModeEnabled: boolean
+  currentProvider: TranslationProvider | null
+  defaultModel: string | null
+  configuredProviders: {
+    openai: boolean
+    anthropic: boolean
+    deepseek: boolean
+    openrouter: boolean
+  }
+}
+
+export interface ConfigsResponse {
+  success: boolean
+  configs: ConfigValue[]
+  grouped: {
+    general: ConfigValue[]
+    provider: ConfigValue[]
+    openai: ConfigValue[]
+    anthropic: ConfigValue[]
+    deepseek: ConfigValue[]
+    openrouter: ConfigValue[]
+  }
+  error?: string
+}
+
+export interface ConfigStatusResponse {
+  success: boolean
+  status: ConfigStatus
+  error?: string
+}
+
+export interface ModelsResponse {
+  success: boolean
+  models: ModelInfo[]
+  provider: string
+  error?: string
 }

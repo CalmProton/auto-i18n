@@ -140,3 +140,24 @@ export {
   type PipelineEventFilter,
   type ApiRequestLogFilter,
 } from './pipelineRepository'
+
+// Config Repository
+export {
+  getConfig,
+  getAllConfig,
+  setConfig,
+  deleteConfig,
+  getDecryptedConfig,
+  hasConfig,
+  getConfigBatch,
+  isMockModeEnabledFromDb,
+  getTranslationProviderFromDb,
+  getDefaultModelFromDb,
+  getProviderApiKeyFromDb,
+  getProviderModelFromDb,
+  ConfigKeys,
+  type SystemConfig,
+  type ConfigValue,
+  type SetConfigInput,
+  type ConfigKey,
+} from './configRepository'
