@@ -22,6 +22,14 @@ import { createScopedLogger } from '../utils/logger'
 
 const log = createScopedLogger('routes:config')
 
+// Type helper for route context
+type RouteContext = {
+  params: Record<string, string>
+  query: Record<string, string | undefined>
+  body: unknown
+  set: { status?: number }
+}
+
 const configRoutes = new Elysia({ prefix: '/api/config' })
 
 // ============================================================================
@@ -62,7 +70,8 @@ configRoutes.get('/', async () => {
 
 configRoutes.get(
   '/:key',
-  async ({ params }) => {
+  async (ctx: RouteContext) => {
+    const params = ctx.params as { key: string }
     try {
       const config = await getConfig(params.key)
       
@@ -98,13 +107,11 @@ configRoutes.get(
 
 configRoutes.put(
   '/:key',
-  async ({ params, body }) => {
+  async (ctx: RouteContext) => {
+    const params = ctx.params as { key: string }
+    const body = ctx.body as { value: unknown; description?: string; isSensitive?: boolean }
     try {
-      const { value, description, isSensitive } = body as {
-        value: unknown
-        description?: string
-        isSensitive?: boolean
-      }
+      const { value, description, isSensitive } = body
 
       // Determine if the key is sensitive by default
       const sensitiveKeys = [
@@ -167,16 +174,10 @@ configRoutes.put(
 
 configRoutes.post(
   '/batch',
-  async ({ body }) => {
+  async (ctx: RouteContext) => {
+    const body = ctx.body as { configs: Array<{ key: string; value: unknown; description?: string; isSensitive?: boolean }> }
     try {
-      const { configs } = body as {
-        configs: Array<{
-          key: string
-          value: unknown
-          description?: string
-          isSensitive?: boolean
-        }>
-      }
+      const { configs } = body
 
       const results: ConfigValue[] = []
       const errors: Array<{ key: string; error: string }> = []
@@ -232,7 +233,8 @@ configRoutes.post(
 
 configRoutes.delete(
   '/:key',
-  async ({ params }) => {
+  async (ctx: RouteContext) => {
+    const params = ctx.params as { key: string }
     try {
       const deleted = await deleteConfig(params.key)
       
@@ -271,7 +273,9 @@ configRoutes.delete(
 
 configRoutes.get(
   '/models/:provider',
-  async ({ params, query }) => {
+  async (ctx: RouteContext) => {
+    const params = ctx.params as { provider: string }
+    const query = ctx.query as { apiKey?: string } | undefined
     try {
       const provider = params.provider as Provider
       const validProviders = ['openai', 'anthropic', 'deepseek', 'openrouter']
