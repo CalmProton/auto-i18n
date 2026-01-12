@@ -31,9 +31,12 @@ export interface BatchRequestRecord {
   size: number
 }
 
+export type BatchProvider = 'openai' | 'anthropic'
+
 export interface BatchManifest {
   batchId: string
   senderId: string
+  provider?: BatchProvider
   types: BatchTranslationType[]
   sourceLocale: string
   targetLocales: string[]
@@ -49,6 +52,13 @@ export interface BatchManifest {
     endpoint?: string
     status?: string
     submissionTimestamp?: string
+  }
+  anthropic?: {
+    batchId?: string
+    status?: string
+    submissionTimestamp?: string
+    processingStatus?: string
+    resultsUrl?: string
   }
 }
 
@@ -473,6 +483,7 @@ export async function createBatch(options: CreateBatchOptions): Promise<CreateBa
   const manifest: BatchManifest = {
     batchId,
     senderId,
+    provider: 'openai',
     types: manifestTypes,
     sourceLocale,
     targetLocales,

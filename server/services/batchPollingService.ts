@@ -1,12 +1,12 @@
 /**
- * Background service for polling OpenAI batch statuses
+ * Background service for polling batch statuses (OpenAI and Anthropic)
  */
 
 import { readdirSync, existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { createScopedLogger } from '../utils/logger'
-import { checkBatchStatus } from './translation/openaiBatchService'
-import type { BatchManifest } from './translation/openaiBatchService'
+import { checkBatchStatus } from './translation/unifiedBatchService'
+import type { BatchManifest, BatchProvider } from './translation/batchTypes'
 
 const log = createScopedLogger('services:batchPolling')
 
@@ -18,11 +18,18 @@ const MANIFEST_FILE = 'manifest.json'
 let pollingInterval: Timer | null = null
 let isPolling = false
 
+interface PendingBatch {
+  senderId: string
+  batchId: string
+  provider: BatchProvider
+  providerBatchId: string
+}
+
 /**
- * Find all pending batches across all sessions
+ * Find all pending batches across all sessions (both OpenAI and Anthropic)
  */
-function findPendingBatches(): Array<{ senderId: string; batchId: string; openaiBatchId: string }> {
-  const pendingBatches: Array<{ senderId: string; batchId: string; openaiBatchId: string }> = []
+function findPendingBatches(): PendingBatch[] {
+  const pendingBatches: PendingBatch[] = []
 
   if (!existsSync(TMP_DIR)) {
     return pendingBatches
@@ -57,18 +64,31 @@ function findPendingBatches(): Array<{ senderId: string; batchId: string; openai
 
           // Check if batch is in a pending state
           const isSubmitted = manifest.status === 'submitted'
-          const hasOpenAIBatchId = !!manifest.openai?.batchId
-          const openaiStatus = manifest.openai?.status
-
-          // Poll if submitted and not in a terminal state
-          if (isSubmitted && hasOpenAIBatchId && openaiStatus && 
-              !['completed', 'failed', 'expired', 'cancelled'].includes(openaiStatus) &&
-              manifest.openai?.batchId) {
-            pendingBatches.push({
-              senderId,
-              batchId,
-              openaiBatchId: manifest.openai.batchId
-            })
+          
+          // Check for OpenAI batches
+          if (isSubmitted && manifest.openai?.batchId) {
+            const openaiStatus = manifest.openai.status
+            if (openaiStatus && !['completed', 'failed', 'expired', 'cancelled'].includes(openaiStatus)) {
+              pendingBatches.push({
+                senderId,
+                batchId,
+                provider: 'openai',
+                providerBatchId: manifest.openai.batchId
+              })
+            }
+          }
+          
+          // Check for Anthropic batches
+          if (isSubmitted && manifest.anthropic?.batchId) {
+            const anthropicStatus = manifest.anthropic.processingStatus || manifest.anthropic.status
+            if (anthropicStatus && !['ended', 'canceling'].includes(anthropicStatus)) {
+              pendingBatches.push({
+                senderId,
+                batchId,
+                provider: 'anthropic',
+                providerBatchId: manifest.anthropic.batchId
+              })
+            }
           }
         } catch (error) {
           log.warn('Failed to read manifest', { senderId, batchId, error })
@@ -80,6 +100,19 @@ function findPendingBatches(): Array<{ senderId: string; batchId: string; openai
   }
 
   return pendingBatches
+}
+
+/**
+ * Get previous status from manifest
+ */
+function getPreviousStatus(manifest: BatchManifest): string | undefined {
+  if (manifest.provider === 'anthropic' && manifest.anthropic) {
+    return manifest.anthropic.processingStatus || manifest.anthropic.status
+  }
+  if (manifest.openai) {
+    return manifest.openai.status
+  }
+  return undefined
 }
 
 /**
@@ -101,17 +134,22 @@ async function pollPendingBatches() {
       return
     }
 
-    log.info('Polling batch statuses', { count: pendingBatches.length })
+    log.info('Polling batch statuses', { 
+      count: pendingBatches.length,
+      openai: pendingBatches.filter(b => b.provider === 'openai').length,
+      anthropic: pendingBatches.filter(b => b.provider === 'anthropic').length
+    })
 
     // Store previous statuses to detect changes
     const previousStatuses = new Map<string, string>()
-    for (const { senderId, batchId, openaiBatchId } of pendingBatches) {
+    for (const { senderId, batchId } of pendingBatches) {
       const manifestPath = join(TMP_DIR, senderId, BATCHES_DIR, batchId, MANIFEST_FILE)
       try {
         const manifestContent = readFileSync(manifestPath, 'utf-8')
         const manifest = JSON.parse(manifestContent) as BatchManifest
-        if (manifest.openai?.status) {
-          previousStatuses.set(batchId, manifest.openai.status)
+        const prevStatus = getPreviousStatus(manifest)
+        if (prevStatus) {
+          previousStatuses.set(batchId, prevStatus)
         }
       } catch {
         // Ignore errors
@@ -119,7 +157,7 @@ async function pollPendingBatches() {
     }
 
     const results = await Promise.allSettled(
-      pendingBatches.map(async ({ senderId, batchId, openaiBatchId }) => {
+      pendingBatches.map(async ({ senderId, batchId, provider, providerBatchId }) => {
         try {
           const result = await checkBatchStatus({ senderId, batchId })
           
@@ -129,7 +167,8 @@ async function pollPendingBatches() {
             log.info('🔄 Batch status CHANGED', {
               senderId,
               batchId,
-              openaiBatchId,
+              provider,
+              providerBatchId,
               previousStatus,
               newStatus: result.status,
               requestCounts: result.requestCounts
@@ -138,7 +177,8 @@ async function pollPendingBatches() {
             log.info('Batch status checked', {
               senderId,
               batchId,
-              openaiBatchId,
+              provider,
+              providerBatchId,
               status: result.status,
               requestCounts: result.requestCounts
             })
@@ -146,7 +186,7 @@ async function pollPendingBatches() {
 
           return result
         } catch (error) {
-          log.error('Failed to check batch status', { senderId, batchId, openaiBatchId, error })
+          log.error('Failed to check batch status', { senderId, batchId, provider, providerBatchId, error })
           throw error
         }
       })

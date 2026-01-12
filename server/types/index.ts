@@ -49,6 +49,7 @@ export interface SavedFileInfo {
 }
 
 export type TranslationFileType = FileType
+export type BatchProvider = 'openai' | 'anthropic'
 
 export interface TranslationFileDescriptor {
   type: TranslationFileType

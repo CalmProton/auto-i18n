@@ -57,10 +57,10 @@ async function handleBatchPollJob(data: JobData): Promise<Record<string, unknown
     return { status: batch.status, skipped: true }
   }
   
-  // Import OpenAI service dynamically to avoid circular deps
-  const { checkBatchStatus } = await import('../services/translation/openaiBatchService')
+  // Import unified batch service dynamically to avoid circular deps
+  const { checkBatchStatus } = await import('../services/translation/unifiedBatchService')
   
-  // Check status with OpenAI
+  // Check status with provider
   const statusResult = await checkBatchStatus({ senderId, batchId })
   
   // Update batch in database
@@ -71,15 +71,20 @@ async function handleBatchPollJob(data: JobData): Promise<Record<string, unknown
   })
   
   // Handle terminal states
-  if (statusResult.status === 'completed') {
-    log.info('Batch completed, queuing processing job', { batchId })
+  // For Anthropic: 'ended' means completed
+  // For OpenAI: 'completed' means completed
+  const isCompleted = statusResult.status === 'completed' || statusResult.status === 'ended'
+  
+  if (isCompleted) {
+    log.info('Batch completed, queuing processing job', { batchId, provider: statusResult.provider })
     await addBatchProcessJob({ batchId, senderId })
     return { status: 'completed', willProcess: true }
   }
   
-  if (statusResult.status === 'failed' || statusResult.status === 'cancelled' || statusResult.status === 'expired') {
-    log.warn('Batch failed', { batchId, status: statusResult.status })
-    await batchRepository.markBatchFailed(batchId, `OpenAI batch ${statusResult.status}`)
+  const isFailed = ['failed', 'cancelled', 'expired', 'canceling'].includes(statusResult.status)
+  if (isFailed) {
+    log.warn('Batch failed', { batchId, status: statusResult.status, provider: statusResult.provider })
+    await batchRepository.markBatchFailed(batchId, `${statusResult.provider} batch ${statusResult.status}`)
     return { status: statusResult.status, failed: true }
   }
   
@@ -114,56 +119,111 @@ async function handleBatchProcessJob(data: JobData): Promise<Record<string, unkn
   
   log.info('Processing batch output', { batchId, senderId })
   
-  // Get batch from database to get the OpenAI output file ID
-  const batch = await batchRepository.getBatchByBatchId(batchId)
-  if (!batch || !batch.openaiBatchId) {
-    throw new Error(`Batch not found or no OpenAI batch ID: ${batchId}`)
+  // Determine provider from batch manifest
+  const { getProviderFromBatch } = await import('../services/translation/unifiedBatchService')
+  const { readBatchFile, batchFileExists } = await import('../utils/batchStorage')
+  
+  let provider: 'openai' | 'anthropic'
+  try {
+    provider = getProviderFromBatch(senderId, batchId)
+  } catch {
+    // Fall back to database check
+    const batch = await batchRepository.getBatchByBatchId(batchId)
+    provider = batch?.openaiBatchId ? 'openai' : 'anthropic'
   }
   
-  // Import OpenAI client and get API key from config
-  const { default: OpenAI } = await import('openai')
-  const { getDecryptedConfig, ConfigKeys } = await import('../repositories/configRepository')
+  log.info('Processing batch for provider', { batchId, senderId, provider })
   
-  // Get API key from database config, fall back to environment variable
-  const apiKey = await getDecryptedConfig(ConfigKeys.OPENAI_API_KEY) ?? process.env.OPENAI_API_KEY
-  const baseURL = process.env.OPENAI_API_URL
-  
-  if (!apiKey) {
-    throw new Error('OpenAI API key not configured')
-  }
-  
-  const openai = new OpenAI({
-    apiKey,
-    baseURL,
-  })
-  
-  // Get batch to find output file
-  const openaiBatch = await openai.batches.retrieve(batch.openaiBatchId)
-  
-  if (!openaiBatch.output_file_id) {
-    throw new Error(`Batch ${batchId} has no output file`)
-  }
-  
-  // Download output file content
-  const fileContent = await openai.files.content(openaiBatch.output_file_id)
-  const outputContent = await fileContent.text()
-  
-  // Process the output
-  const { processBatchOutput } = await import('../services/translation/batchOutputProcessor')
-  const results = await processBatchOutput({ senderId, batchId, outputContent })
-  
-  // Count successes and failures
-  const successful = results.filter(r => r.status === 'success').length
-  const failed = results.filter(r => r.status === 'error').length
-  
-  // Update batch status
-  await batchRepository.markBatchCompleted(batchId, successful, failed)
-  log.info('Batch processed successfully', { batchId, filesWritten: successful, failed })
-  
-  return { 
-    success: true, 
-    filesWritten: successful,
-    errors: failed,
+  if (provider === 'anthropic') {
+    // Handle Anthropic batch processing
+    const manifestPath = 'manifest.json'
+    const manifestContent = readBatchFile(senderId, batchId, manifestPath)
+    const manifest = JSON.parse(manifestContent)
+    const anthropicBatchId = manifest.anthropic?.batchId
+    
+    if (!anthropicBatchId) {
+      throw new Error(`Batch ${batchId} has no Anthropic batch ID`)
+    }
+    
+    // Find the output file
+    const outputFileName = `${anthropicBatchId}_output.json`
+    if (!batchFileExists(senderId, batchId, outputFileName)) {
+      throw new Error(`Batch ${batchId} has no output file`)
+    }
+    
+    const outputContent = readBatchFile(senderId, batchId, outputFileName)
+    
+    // Process the output
+    const { processBatchOutput } = await import('../services/translation/anthropicBatchOutputProcessor')
+    const results = await processBatchOutput({ senderId, batchId, outputContent })
+    
+    // Count successes and failures
+    const successful = results.filter(r => r.status === 'success').length
+    const failed = results.filter(r => r.status === 'error').length
+    
+    // Update batch status
+    await batchRepository.markBatchCompleted(batchId, successful, failed)
+    log.info('Anthropic batch processed successfully', { batchId, filesWritten: successful, failed })
+    
+    return { 
+      success: true, 
+      provider: 'anthropic',
+      filesWritten: successful,
+      errors: failed,
+    }
+  } else {
+    // Handle OpenAI batch processing
+    const batch = await batchRepository.getBatchByBatchId(batchId)
+    if (!batch || !batch.openaiBatchId) {
+      throw new Error(`Batch not found or no OpenAI batch ID: ${batchId}`)
+    }
+    
+    // Import OpenAI client and get API key from config
+    const { default: OpenAI } = await import('openai')
+    const { getDecryptedConfig, ConfigKeys } = await import('../repositories/configRepository')
+    
+    // Get API key from database config, fall back to environment variable
+    const apiKey = await getDecryptedConfig(ConfigKeys.OPENAI_API_KEY) ?? process.env.OPENAI_API_KEY
+    const baseURL = process.env.OPENAI_API_URL
+    
+    if (!apiKey) {
+      throw new Error('OpenAI API key not configured')
+    }
+    
+    const openai = new OpenAI({
+      apiKey,
+      baseURL,
+    })
+    
+    // Get batch to find output file
+    const openaiBatch = await openai.batches.retrieve(batch.openaiBatchId)
+    
+    if (!openaiBatch.output_file_id) {
+      throw new Error(`Batch ${batchId} has no output file`)
+    }
+    
+    // Download output file content
+    const fileContent = await openai.files.content(openaiBatch.output_file_id)
+    const outputContent = await fileContent.text()
+    
+    // Process the output
+    const { processBatchOutput } = await import('../services/translation/batchOutputProcessor')
+    const results = await processBatchOutput({ senderId, batchId, outputContent })
+    
+    // Count successes and failures
+    const successful = results.filter(r => r.status === 'success').length
+    const failed = results.filter(r => r.status === 'error').length
+    
+    // Update batch status
+    await batchRepository.markBatchCompleted(batchId, successful, failed)
+    log.info('OpenAI batch processed successfully', { batchId, filesWritten: successful, failed })
+    
+    return { 
+      success: true, 
+      provider: 'openai',
+      filesWritten: successful,
+      errors: failed,
+    }
   }
 }
 
