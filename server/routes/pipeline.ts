@@ -11,8 +11,10 @@ import {
   deleteOldPipelineEvents,
   deleteOldApiRequestLogs,
   clearSessionLogs,
+  createPipelineEvent,
 } from '../repositories/pipelineRepository'
-import { getSessionBySenderId } from '../repositories/sessionRepository'
+import { getSessionBySenderId, updateSessionStatus } from '../repositories/sessionRepository'
+import { cancelJobsBySenderId } from '../queues'
 
 const pipelineRoutes = new Elysia({ prefix: '/api/pipeline' })
 const log = createScopedLogger('routes:pipeline')
@@ -314,7 +316,6 @@ pipelineRoutes.delete('/:senderId/logs', async (ctx: RouteContext) => {
 /**
  * POST /api/pipeline/:senderId/cancel
  * Cancel a running pipeline
- * TODO: Implement actual cancellation logic with BullMQ job cancellation
  */
 pipelineRoutes.post('/:senderId/cancel', async (ctx: RouteContext) => {
   try {
@@ -327,17 +328,27 @@ pipelineRoutes.post('/:senderId/cancel', async (ctx: RouteContext) => {
 
     log.info('Cancelling pipeline', { senderId })
 
-    // TODO: Implement actual cancellation logic
-    // This would involve:
-    // 1. Finding active BullMQ jobs for this senderId
-    // 2. Cancelling them
-    // 3. Updating pipeline events with cancelled status
+    // 1. Cancel pending queue jobs
+    const cancelledCount = await cancelJobsBySenderId(senderId)
+    
+    // 2. Get session to record event
+    const session = await getSessionBySenderId(senderId)
+    if (session) {
+      // 3. Record cancellation event
+      await createPipelineEvent({
+        sessionId: session.id,
+        step: 'cleanup',
+        status: 'cancelled',
+        message: `Pipeline cancelled by user. Stopped ${cancelledCount} pending jobs.`
+      })
+    }
 
     return {
       success: true,
       senderId,
       cancelled: true,
-      message: 'Pipeline cancellation requested'
+      jobsStopped: cancelledCount,
+      message: `Pipeline cancellation requested. Stopped ${cancelledCount} pending jobs.`
     }
   } catch (error) {
     log.error('Failed to cancel pipeline', { error })
@@ -349,7 +360,6 @@ pipelineRoutes.post('/:senderId/cancel', async (ctx: RouteContext) => {
 /**
  * POST /api/pipeline/:senderId/restart
  * Restart a pipeline from the beginning
- * TODO: Implement actual restart logic
  */
 pipelineRoutes.post('/:senderId/restart', async (ctx: RouteContext) => {
   try {
@@ -362,17 +372,38 @@ pipelineRoutes.post('/:senderId/restart', async (ctx: RouteContext) => {
 
     log.info('Restarting pipeline', { senderId })
 
-    // TODO: Implement actual restart logic
-    // This would involve:
-    // 1. Cancelling any active jobs
-    // 2. Clearing previous pipeline events
-    // 3. Re-triggering the translation pipeline
+    // 1. Find session
+    const session = await getSessionBySenderId(senderId)
+    if (!session) {
+      ctx.set.status = 404
+      return { success: false, error: 'Session not found' }
+    }
+
+    // 2. Cancel any active jobs for this sender
+    const cancelledCount = await cancelJobsBySenderId(senderId)
+
+    // 3. Clear previous pipeline events and logs
+    const clearResult = await clearSessionLogs(session.id)
+
+    // 4. Reset session status to active
+    await updateSessionStatus(senderId, 'active')
+
+    // 5. Record restart event
+    await createPipelineEvent({
+      sessionId: session.id,
+      step: 'cleanup',
+      status: 'started',
+      message: 'Pipeline restarted by user. Previous logs cleared and pending jobs cancelled.'
+    })
 
     return {
       success: true,
       senderId,
       restarted: true,
-      message: 'Pipeline restart requested'
+      jobsStopped: cancelledCount,
+      clearedEvents: clearResult.pipelineEventsDeleted,
+      clearedLogs: clearResult.apiLogsDeleted,
+      message: 'Pipeline restarted. Logs cleared and session reset to active.'
     }
   } catch (error) {
     log.error('Failed to restart pipeline', { error })

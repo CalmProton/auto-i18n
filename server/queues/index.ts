@@ -30,6 +30,7 @@ export {
   failJob,
   retryJob,
   cancelJob,
+  cancelJobsBySenderId,
   
   // Queue management
   getQueueStats,

@@ -417,6 +417,36 @@ export async function cancelJob(jobId: string): Promise<boolean> {
 }
 
 /**
+ * Cancel all pending jobs for a specific sender
+ */
+export async function cancelJobsBySenderId(senderId: string): Promise<number> {
+  const db = getDatabase()
+  
+  // Use sql fragment for JSONB containment check
+  // data @> '{"senderId": "..."}'
+  const result = await db
+    .update(jobQueue)
+    .set({
+      status: 'cancelled',
+      completedAt: new Date(),
+      updatedAt: new Date(),
+    })
+    .where(
+      and(
+        eq(jobQueue.status, 'pending'),
+        sql`${jobQueue.data} @> ${JSON.stringify({ senderId })}::jsonb`
+      )
+    )
+    .returning({ id: jobQueue.id })
+  
+  if (result.length > 0) {
+    log.info('Cancelled jobs for sender', { senderId, count: result.length })
+  }
+  
+  return result.length
+}
+
+/**
  * Get pending jobs for a specific queue
  */
 export async function getPendingJobs(
