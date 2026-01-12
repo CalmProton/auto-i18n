@@ -2,7 +2,7 @@
  * Queue Module Exports
  * 
  * PostgreSQL-based job queue implementation.
- * This replaces BullMQ with a simple SKIP LOCKED pattern.
+ * 
  */
 
 // Re-export everything from the PostgreSQL queue module

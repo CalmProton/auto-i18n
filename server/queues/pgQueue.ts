@@ -2,7 +2,7 @@
  * PostgreSQL-based Job Queue
  * 
  * Implements a pg-boss style queue using SKIP LOCKED for safe concurrent job processing.
- * This replaces BullMQ and removes the need for Redis/DragonflyDB.
+ *
  */
 import { eq, and, lte, sql, desc, isNull } from 'drizzle-orm'
 import { getDatabase, getSqlClient } from '../database/connection'
