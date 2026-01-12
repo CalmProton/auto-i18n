@@ -7,7 +7,7 @@ import { eq } from 'drizzle-orm'
 import { getDatabase } from '../database/connection'
 import { systemConfig } from '../database/schema'
 import type { SystemConfig, NewSystemConfig } from '../database/schema'
-import { cacheDel, cacheGet, cacheSet } from '../database/redis'
+import { cacheDel, cacheGet, cacheSet } from '../cache/memory'
 import { createScopedLogger } from '../utils/logger'
 import { createCipheriv, createDecipheriv, randomBytes, scryptSync } from 'node:crypto'
 

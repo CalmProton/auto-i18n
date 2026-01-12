@@ -1,7 +1,7 @@
 /**
  * Cache Module
  * Provides high-level caching utilities for common operations
- * Uses DragonflyDB (Redis-compatible) as the backing store
+ * Uses in-memory LRU cache as the backing store
  */
 import { 
   cacheGet, 
@@ -12,7 +12,7 @@ import {
   publish,
   subscribe,
   type MessageHandler
-} from '../database/redis'
+} from './memory'
 import { createScopedLogger } from '../utils/logger'
 
 const log = createScopedLogger('cache')

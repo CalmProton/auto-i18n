@@ -63,6 +63,18 @@ export type PipelineStep = (typeof pipelineStepValues)[number]
 export const pipelineEventStatusValues = ['started', 'in-progress', 'completed', 'failed', 'cancelled', 'retrying'] as const
 export type PipelineEventStatus = (typeof pipelineEventStatusValues)[number]
 
+export const jobQueueStatusValues = ['pending', 'running', 'completed', 'failed', 'cancelled'] as const
+export type JobQueueStatus = (typeof jobQueueStatusValues)[number]
+
+export const jobQueueNameValues = [
+  'batch-poll',
+  'batch-process',
+  'github-finalize',
+  'cleanup',
+  'stats-update',
+] as const
+export type JobQueueName = (typeof jobQueueNameValues)[number]
+
 // ============================================================================
 // SESSIONS TABLE
 // ============================================================================
@@ -387,6 +399,51 @@ export const apiRequestLogs = pgTable('api_request_logs', {
 ])
 
 // ============================================================================
+// JOB_QUEUE TABLE - PostgreSQL-based job queue (pg-boss pattern)
+// Uses SKIP LOCKED for safe concurrent job claiming
+// ============================================================================
+
+export const jobQueue = pgTable('job_queue', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  
+  // Job identification
+  name: varchar('name', { length: 50 }).notNull().$type<JobQueueName>(),
+  status: varchar('status', { length: 20 }).notNull().default('pending').$type<JobQueueStatus>(),
+  
+  // Job data (JSON payload)
+  data: jsonb('data').notNull().$type<Record<string, unknown>>(),
+  
+  // Scheduling
+  runAt: timestamp('run_at', { withTimezone: true }).notNull().defaultNow(),
+  startedAt: timestamp('started_at', { withTimezone: true }),
+  completedAt: timestamp('completed_at', { withTimezone: true }),
+  
+  // Retry configuration
+  attempts: integer('attempts').notNull().default(0),
+  maxAttempts: integer('max_attempts').notNull().default(3),
+  
+  // Result/Error tracking
+  result: jsonb('result').$type<Record<string, unknown>>(),
+  errorMessage: text('error_message'),
+  errorStack: text('error_stack'),
+  
+  // Worker identification (for debugging)
+  workerId: varchar('worker_id', { length: 255 }),
+  
+  // Timestamps
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  
+  // Expiration (for completed/failed jobs cleanup)
+  expiresAt: timestamp('expires_at', { withTimezone: true }),
+}, (table) => [
+  index('idx_job_queue_name').on(table.name),
+  index('idx_job_queue_status').on(table.status),
+  index('idx_job_queue_run_at').on(table.runAt),
+  index('idx_job_queue_pending').on(table.name, table.status, table.runAt),
+])
+
+// ============================================================================
 // SYSTEM_CONFIG TABLE - Stores system-wide configuration (translation settings, etc.)
 // ============================================================================
 
@@ -521,3 +578,6 @@ export type NewPipelineEvent = typeof pipelineEvents.$inferInsert
 
 export type ApiRequestLog = typeof apiRequestLogs.$inferSelect
 export type NewApiRequestLog = typeof apiRequestLogs.$inferInsert
+
+export type JobQueueItem = typeof jobQueue.$inferSelect
+export type NewJobQueueItem = typeof jobQueue.$inferInsert

@@ -15,7 +15,7 @@ import type {
   BatchRequestStatus,
   BatchManifest,
 } from '../database/schema'
-import { cacheGet, cacheSet, cacheDel } from '../database/redis'
+import { cacheGet, cacheSet, cacheDel } from '../cache/memory'
 import { createScopedLogger } from '../utils/logger'
 
 const log = createScopedLogger('repository:batch')

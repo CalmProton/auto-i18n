@@ -6,7 +6,7 @@ import { eq, and, desc, lt, sql, isNull } from 'drizzle-orm'
 import { getDatabase } from '../database/connection'
 import { sessions, translationJobs } from '../database/schema'
 import type { Session, NewSession, SessionStatus, SessionType } from '../database/schema'
-import { cacheDel, cacheGet, cacheSet } from '../database/redis'
+import { cacheDel, cacheGet, cacheSet } from '../cache/memory'
 import { createScopedLogger } from '../utils/logger'
 
 const log = createScopedLogger('repository:session')

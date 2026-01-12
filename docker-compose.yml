@@ -24,42 +24,12 @@ services:
     networks:
       - auto-i18n-net
 
-  dragonfly:
-    image: docker.dragonflydb.io/dragonflydb/dragonfly:v1.35.1
-    container_name: auto-i18n-dragonfly
-    command:
-      - dragonfly
-      - --dir=/data
-      - --dbfilename=dump-{timestamp}
-      - --snapshot_cron=*/5 * * * *
-      - --cluster_mode=emulated
-      - --lock_on_hashtags
-    expose:
-      - '6379'
-    ports:
-      - '6379:6379'
-    restart: unless-stopped
-    volumes:
-      - dragonfly-data:/data
-    healthcheck:
-      test:
-        - CMD
-        - redis-cli
-        - ping
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 10s
-    networks:
-      - auto-i18n-net
-
   app:
     build: .
     container_name: auto-i18n-app
     environment:
       - PORT=3000
       - DATABASE_URL=postgresql://auto_i18n:auto_i18n_password@postgres:5432/auto_i18n
-      - REDIS_URL=redis://dragonfly:6379
     expose:
       - '3000'
     ports:
@@ -78,8 +48,6 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-      dragonfly:
-        condition: service_healthy
     networks:
       - auto-i18n-net
 
@@ -89,6 +57,4 @@ networks:
 
 volumes:
   postgres-data:
-    driver: local
-  dragonfly-data:
     driver: local

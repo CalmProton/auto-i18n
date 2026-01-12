@@ -6,8 +6,7 @@ import routes from './routes'
 import { authMiddleware, authRoutes } from './middleware/auth'
 import { startBatchPolling } from './services/batchPollingService'
 import { initializeAll, closeAll, healthCheckAll } from './database'
-import { startAllWorkers, stopAllWorkers } from './queues/workers'
-import { scheduleCleanupJob, closeAllQueues } from './queues'
+import { startAllWorkers, stopAllWorkers, scheduleCleanupJob } from './queues'
 import { createScopedLogger } from './utils/logger'
 import { markDatabaseInitialized } from './config/env'
 
@@ -50,7 +49,6 @@ async function shutdown() {
   
   try {
     await stopAllWorkers()
-    await closeAllQueues()
     await closeAll()
     log.info('Server shutdown complete')
   } catch (error) {
@@ -137,7 +135,6 @@ app.get('/health', async () => {
     status: dbHealth.overall ? 'ok' : 'degraded',
     timestamp: new Date().toISOString(),
     database: dbHealth.database,
-    redis: dbHealth.redis,
   }
 })
 

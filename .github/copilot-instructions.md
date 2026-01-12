@@ -3,7 +3,7 @@
 ## Startup & tooling
 
 - **Runtime**: Bun v1.3.0+; install deps with `bun install`.
-- **Database**: PostgreSQL 18.1 + DragonflyDB (Redis-compatible). Start with `bun run docker:up`.
+- **Database**: PostgreSQL 18.1. Start with `bun run docker:db`.
 - **Migrations**: Run `bun run db:generate` to generate migrations, `bun run db:migrate` to apply them.
 - **API Server**: Run with `bun run dev` (uses `--hot` flag for hot reload). ElysiaJS listens on port 3000 by default (configurable via `PORT` env var).
 - **Vue Dashboard**: Run with `bun run client` (Vite dev server on port 5173).
@@ -15,20 +15,19 @@
 ### Backend (ElysiaJS)
 
 - `server/index.ts` boots an ElysiaJS app with CORS support, authentication middleware, database initialization, and queue workers.
-- **Database Layer**: `server/database/` provides Drizzle ORM (`connection.ts`), schema definitions (`schema.ts`), and Redis (`redis.ts`) connections.
+- **Database Layer**: `server/database/` provides Drizzle ORM (`connection.ts`) with Bun's native SQL bindings and schema definitions (`schema.ts`).
 - **Repositories**: `server/repositories/` provides data access layer using Drizzle ORM for `sessions`, `files`, `batches`, `translation_jobs`.
-- **Cache**: `server/cache/` provides caching utilities, pub/sub, and distributed locks using Redis.
-- **Queues**: `server/queues/` provides BullMQ job queues with DragonflyDB backend for async processing.
+- **Cache**: `server/cache/` provides in-memory LRU caching utilities and in-process pub/sub.
+- **Queues**: `server/queues/` provides PostgreSQL-based job queue using SKIP LOCKED pattern for async processing.
 - Auth routes (`/api/auth/*`) are mounted first and are not protected.
 - `authMiddleware` protects all other routes when `ACCESS_KEY` is set in environment.
 - Route modules are grouped: `content`, `global`, `page`, `batch`, `github`, `dashboard`.
 
 ### Database Architecture
 
-- **PostgreSQL**: Primary data store for sessions, files, batches, translation jobs.
-- **Drizzle ORM**: Type-safe database layer with schema in `server/database/schema.ts`.
-- **DragonflyDB**: Redis-compatible cache and queue backend (runs with `--cluster_mode=emulated --lock_on_hashtags` for BullMQ optimization).
-- **BullMQ**: Job queue for async processing (batch polling, output processing, GitHub finalization).
+- **PostgreSQL**: Primary data store for sessions, files, batches, translation jobs, and job queue.
+- **Drizzle ORM**: Type-safe database layer with Bun's native SQL bindings. Schema in `server/database/schema.ts`.
+- **Job Queue**: PostgreSQL-based queue using SKIP LOCKED for safe concurrent job processing. No external dependencies required.
 - **Migrations**: Managed by Drizzle Kit in `server/database/migrations/`.
 
 ### Frontend (Vue 3)
@@ -149,6 +148,7 @@ All dashboard endpoints use helper functions from `utils/dashboardUtils.ts`.
 - **files**: All file types (upload, translation, delta, original) with content stored as TEXT
 - **batches**: OpenAI batch jobs with manifest as JSONB
 - **batch_requests**: Individual requests within batches
+- **job_queue**: PostgreSQL-based job queue for async processing
 - **translation_stats**: Dashboard statistics
 
 ### Repository Pattern
@@ -171,22 +171,22 @@ const existing = await getSessionBySenderId('my-sender')
 
 ### Cache Pattern
 
-Use cache utilities in `server/cache/` for caching and pub/sub:
+Use in-memory cache utilities in `server/cache/` for caching and pub/sub:
 
 ```typescript
 import { cacheGet, cacheSet, publish, Channels } from '../cache'
 
-// Cache data
+// Cache data (in-memory LRU cache)
 await cacheSet('key', data, 300) // 5 minute TTL
 const cached = await cacheGet('key', true) // parse JSON
 
-// Publish events
+// Publish events (in-process only)
 await publish(Channels.batchCompleted, { batchId, status: 'completed' })
 ```
 
 ### Queue Pattern
 
-Use BullMQ queues in `server/queues/` for async processing:
+Use PostgreSQL-based queues in `server/queues/` for async processing:
 
 ```typescript
 import { addBatchPollJob, addGitHubFinalizeJob } from '../queues'
