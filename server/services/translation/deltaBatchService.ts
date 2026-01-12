@@ -9,7 +9,7 @@ import type { JsonDelta, MarkdownDelta } from '../../types'
 import { createScopedLogger } from '../../utils/logger'
 import { writeBatchFile, sanitizeBatchSegment } from '../../utils/batchStorage'
 import { getTranslationConfig } from '../../config/env'
-import type { BatchManifest } from './openaiBatchService'
+import type { BatchManifest } from '../batch'
 import type OpenAI from 'openai'
 
 const log = createScopedLogger('services:deltaBatchService')

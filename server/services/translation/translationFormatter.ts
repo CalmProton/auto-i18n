@@ -2,7 +2,7 @@ import { mkdir, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { createScopedLogger } from '../../utils/logger'
 import { getTempRoot } from '../../utils/fileStorage'
-import type { ProcessedTranslation } from './batchOutputProcessor'
+import type { ProcessedTranslation } from '../batch'
 
 const log = createScopedLogger('translation:translationFormatter')
 

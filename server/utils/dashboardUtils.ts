@@ -18,7 +18,7 @@ import type {
   TranslationFileStatus,
 } from '../types/api'
 import type { TranslationMetadataFile } from '../types'
-import type { BatchManifest } from '../services/translation/openaiBatchService'
+import type { BatchManifest } from '../services/batch'
 import { SUPPORTED_LOCALES } from '../config/locales'
 import { getTranslationConfig } from '../config/env'
 import { getGitHubConfig } from '../config/github'

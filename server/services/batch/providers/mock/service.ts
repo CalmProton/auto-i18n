@@ -1,27 +1,29 @@
 /**
  * Mock Batch Service
- *
- * Provides mock implementations for batch operations when in mock mode.
- * Generates placeholder translations without calling OpenAI's Batch API.
+ * Provides mock implementations for batch operations during testing
  */
 import { randomUUID } from 'node:crypto'
-import { getBatchFilePath, readBatchFile, writeBatchFile, batchFileExists } from '../../utils/batchStorage'
-import { createScopedLogger } from '../../utils/logger'
-import type { BatchManifest, BatchRequestRecord, CreateBatchResult, SubmitBatchResult, CheckBatchStatusResult } from './openaiBatchService'
+import { batchFileExists, readBatchFile, writeBatchFile } from '../../../../utils/batchStorage'
+import { createScopedLogger } from '../../../../utils/logger'
+import { loadManifest, saveManifest } from '../../common'
+import type {
+  BatchManifest,
+  BatchRequestRecord,
+  SubmitBatchResult,
+  CheckBatchStatusResult
+} from '../../types'
 
-const log = createScopedLogger('translation:mockBatch')
+const log = createScopedLogger('batch:mock')
 
 const MOCK_BATCH_ID_PREFIX = 'mock_batch_'
 const MOCK_OUTPUT_FILE_NAME = 'mock_output.jsonl'
 
-interface MockBatchOptions {
-  senderId: string
-  batchId: string
-  simulatedDelayMs?: number
-}
+// ============================================================================
+// Public API
+// ============================================================================
 
 /**
- * Generate a mock OpenAI batch ID
+ * Generate a mock batch ID
  */
 export function generateMockBatchId(): string {
   return `${MOCK_BATCH_ID_PREFIX}${randomUUID().slice(0, 8)}`
@@ -37,26 +39,24 @@ export function isMockBatch(batchId: string): boolean {
 /**
  * Submit a batch in mock mode - immediately generates mock output
  */
-export async function submitMockBatch(options: MockBatchOptions): Promise<SubmitBatchResult> {
+export async function submitMockBatch(options: {
+  senderId: string
+  batchId: string
+  simulatedDelayMs?: number
+}): Promise<SubmitBatchResult> {
   const { senderId, batchId, simulatedDelayMs = 500 } = options
 
-  // Simulate processing delay
   await delay(simulatedDelayMs)
 
-  const manifestPath = getBatchFilePath(senderId, batchId, 'manifest.json')
   if (!batchFileExists(senderId, batchId, 'manifest.json')) {
     throw new Error(`Batch ${batchId} manifest not found`)
   }
 
-  const manifestContent = readBatchFile(senderId, batchId, 'manifest.json')
-  const manifest: BatchManifest = JSON.parse(manifestContent)
-
+  const manifest = loadManifest(senderId, batchId)
   const mockOpenAiBatchId = generateMockBatchId()
 
-  // Generate mock output immediately
   await generateMockOutput(senderId, batchId, manifest)
 
-  // Update manifest with mock batch info
   const updatedManifest: BatchManifest = {
     ...manifest,
     status: 'completed',
@@ -66,56 +66,59 @@ export async function submitMockBatch(options: MockBatchOptions): Promise<Submit
       batchId: mockOpenAiBatchId,
       endpoint: '/v1/chat/completions',
       status: 'completed',
-      submissionTimestamp: new Date().toISOString(),
-    },
+      submissionTimestamp: new Date().toISOString()
+    }
   }
 
-  writeBatchFile(senderId, batchId, 'manifest.json', JSON.stringify(updatedManifest, null, 2))
+  saveManifest(senderId, batchId, updatedManifest)
 
   log.info('Mock batch submitted and completed', {
     senderId,
     batchId,
     mockOpenAiBatchId,
-    requestCount: manifest.totalRequests,
+    requestCount: manifest.totalRequests
   })
 
   return {
     batchId,
-    openaiBatchId: mockOpenAiBatchId,
-    openaiStatus: 'completed',
-    inputFileId: `mock_file_${randomUUID().slice(0, 8)}`,
+    providerBatchId: mockOpenAiBatchId,
+    providerStatus: 'completed',
+    provider: 'openai'
   }
 }
 
 /**
  * Check status of a mock batch - always returns completed
  */
-export async function checkMockBatchStatus(options: MockBatchOptions): Promise<CheckBatchStatusResult> {
+export async function checkMockBatchStatus(options: {
+  senderId: string
+  batchId: string
+}): Promise<CheckBatchStatusResult> {
   const { senderId, batchId } = options
 
-  const manifestContent = readBatchFile(senderId, batchId, 'manifest.json')
-  const manifest: BatchManifest = JSON.parse(manifestContent)
-
+  const manifest = loadManifest(senderId, batchId)
   const mockOutputFileName = getMockOutputFileName(manifest.openai?.batchId)
 
   return {
     batchId,
-    openaiBatchId: manifest.openai?.batchId ?? generateMockBatchId(),
+    providerBatchId: manifest.openai?.batchId ?? generateMockBatchId(),
     status: 'completed',
+    provider: 'openai',
     requestCounts: {
       total: manifest.totalRequests,
       completed: manifest.totalRequests,
-      failed: 0,
+      failed: 0
     },
     outputFileId: batchFileExists(senderId, batchId, mockOutputFileName)
       ? `mock_output_${batchId}`
-      : undefined,
+      : undefined
   }
 }
 
-/**
- * Generate mock output JSONL file with placeholder translations
- */
+// ============================================================================
+// Mock Content Generation
+// ============================================================================
+
 async function generateMockOutput(
   senderId: string,
   batchId: string,
@@ -141,10 +144,7 @@ async function generateMockOutput(
       }
     }
 
-    // Find the corresponding request record
     const record = manifest.files.find((f) => f.customId === request.custom_id)
-
-    // Generate mock response based on request type
     const mockContent = generateMockContent(request, record)
 
     const outputRecord = {
@@ -163,19 +163,19 @@ async function generateMockOutput(
               index: 0,
               message: {
                 role: 'assistant',
-                content: mockContent,
+                content: mockContent
               },
-              finish_reason: 'stop',
-            },
+              finish_reason: 'stop'
+            }
           ],
           usage: {
             prompt_tokens: 100,
             completion_tokens: 50,
-            total_tokens: 150,
-          },
-        },
+            total_tokens: 150
+          }
+        }
       },
-      error: null,
+      error: null
     }
 
     outputLines.push(JSON.stringify(outputRecord))
@@ -188,13 +188,10 @@ async function generateMockOutput(
     senderId,
     batchId,
     outputFile: mockOutputFileName,
-    requestCount: outputLines.length,
+    requestCount: outputLines.length
   })
 }
 
-/**
- * Generate mock translated content based on the request
- */
 function generateMockContent(
   request: {
     custom_id: string
@@ -207,34 +204,26 @@ function generateMockContent(
   const customId = request.custom_id
   const userMessage = request.body.messages.find((m) => m.role === 'user')?.content ?? ''
 
-  // Parse custom_id format: type:path:sourceLocale:targetLocale
   const idParts = customId.split(':')
   const targetLocale = idParts[idParts.length - 1] || 'unknown'
   const sourceLocale = idParts[idParts.length - 2] || 'en'
   const filePath = record?.relativePath || idParts.slice(1, -2).join(':') || 'unknown'
 
-  // Determine if this is JSON or Markdown based on format or content
-  const isJson = record?.format === 'json' || userMessage.includes('"') && userMessage.includes('{')
+  const isJson = record?.format === 'json' || (userMessage.includes('"') && userMessage.includes('{'))
 
   if (isJson) {
-    // Try to extract and mock the JSON content
     return generateMockJsonTranslation(userMessage, sourceLocale, targetLocale, filePath)
   } else {
-    // Mock markdown content
     return generateMockMarkdownTranslation(userMessage, sourceLocale, targetLocale, filePath)
   }
 }
 
-/**
- * Generate mock JSON translation with placeholder strings
- */
 function generateMockJsonTranslation(
   content: string,
   sourceLocale: string,
   targetLocale: string,
-  filePath: string
+  _filePath: string
 ): string {
-  // Try to extract JSON from the content
   const jsonMatch = content.match(/```json\s*([\s\S]*?)\s*```/) || content.match(/(\{[\s\S]*\})/)
   if (!jsonMatch) {
     return `{"error": "{translated ${sourceLocale}.error to ${targetLocale}}"}`
@@ -243,16 +232,12 @@ function generateMockJsonTranslation(
   try {
     const jsonContent = JSON.parse(jsonMatch[1])
     const mockTranslated = mockJsonValue(jsonContent, sourceLocale, targetLocale, [])
-    // Wrap in translation_result as expected by the output processor
     return JSON.stringify({ translation_result: mockTranslated })
   } catch {
     return `{"translation_result": {"error": "{translated ${sourceLocale}.parse_error to ${targetLocale}}"}}`
   }
 }
 
-/**
- * Recursively mock JSON values
- */
 function mockJsonValue(
   value: unknown,
   sourceLocale: string,
@@ -285,9 +270,6 @@ function mockJsonValue(
   return value
 }
 
-/**
- * Generate mock Markdown translation
- */
 function generateMockMarkdownTranslation(
   content: string,
   sourceLocale: string,
@@ -296,39 +278,23 @@ function generateMockMarkdownTranslation(
 ): string {
   const fileName = filePath.split('/').pop()?.replace(/\.(md|mdx)$/i, '') || 'content'
 
-  // Find the actual content to translate (after the prompt instructions)
-  const contentMatch = content.match(/Content to translate:\s*([\s\S]*)/) || content.match(/```markdown\s*([\s\S]*?)```/)
+  const contentMatch =
+    content.match(/Content to translate:\s*([\s\S]*)/) || content.match(/```markdown\s*([\s\S]*?)```/)
   const actualContent = contentMatch?.[1]?.trim() || content
 
   const lines = actualContent.split('\n')
   const mockLines = lines.map((line, index) => {
-    if (!line.trim()) {
-      return line
-    }
+    if (!line.trim()) return line
+    if (line.trim() === '---') return line
+    if (line.trim().startsWith('```')) return line
+    if (line.trim().startsWith('import ') || line.trim().startsWith('export ')) return line
 
-    // Preserve frontmatter delimiters
-    if (line.trim() === '---') {
-      return line
-    }
-
-    // Preserve code blocks
-    if (line.trim().startsWith('```')) {
-      return line
-    }
-
-    // Preserve imports
-    if (line.trim().startsWith('import ') || line.trim().startsWith('export ')) {
-      return line
-    }
-
-    // Mock headings
     const headingMatch = line.match(/^(#{1,6})\s+(.+)$/)
     if (headingMatch) {
       const [, hashes] = headingMatch
       return `${hashes} {translated ${sourceLocale}.${fileName}.heading_${index} to ${targetLocale}}`
     }
 
-    // Mock frontmatter values
     const frontmatterMatch = line.match(/^(\s*)([\w-]+):\s*(.+)$/)
     if (frontmatterMatch) {
       const [, indent, key, value] = frontmatterMatch
@@ -338,7 +304,6 @@ function generateMockMarkdownTranslation(
       return line
     }
 
-    // Mock regular text
     if (line.trim().length > 0) {
       const indent = line.match(/^(\s*)/)?.[1] || ''
       return `${indent}{translated ${sourceLocale}.${fileName}.line_${index} to ${targetLocale}}`
@@ -350,16 +315,10 @@ function generateMockMarkdownTranslation(
   return mockLines.join('\n')
 }
 
-/**
- * Get the output file name for a mock batch
- */
 function getMockOutputFileName(openaiBatchId?: string): string {
   return openaiBatchId ? `${openaiBatchId}_output.jsonl` : MOCK_OUTPUT_FILE_NAME
 }
 
-/**
- * Helper to simulate async delay
- */
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }

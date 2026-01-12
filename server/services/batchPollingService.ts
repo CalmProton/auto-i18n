@@ -5,8 +5,7 @@
 import { readdirSync, existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { createScopedLogger } from '../utils/logger'
-import { checkBatchStatus } from './translation/unifiedBatchService'
-import type { BatchManifest, BatchProvider } from './translation/batchTypes'
+import { checkBatchStatus, type BatchManifest, type BatchProvider } from './batch'
 
 const log = createScopedLogger('services:batchPolling')
 

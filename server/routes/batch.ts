@@ -1,19 +1,19 @@
 import { Elysia } from 'elysia'
 import { isSupportedLocale } from '../config/locales'
-import type { ErrorResponse } from '../types'
+import type { ErrorResponse, TranslationFileType } from '../types'
 import {
   createBatch,
   submitBatch,
   checkBatchStatus,
   cancelBatch,
+  createRetryBatch,
   isBatchProcessingAvailable,
-  getProviderFromBatch
-} from '../services/translation/unifiedBatchService'
-import { createRetryBatch } from '../services/translation/openaiBatchService'
-import type { TranslationFileType, BatchProvider } from '../types'
+  getProviderFromBatch,
+  processOpenAIBatchOutput,
+  processAnthropicBatchOutput,
+  type BatchProvider
+} from '../services/batch'
 import { createScopedLogger } from '../utils/logger'
-import { processBatchOutput as processOpenAIBatchOutput } from '../services/translation/batchOutputProcessor'
-import { processBatchOutput as processAnthropicBatchOutput } from '../services/translation/anthropicBatchOutputProcessor'
 import { formatTranslationsForGithub, getTranslationSummary } from '../services/translation/translationFormatter'
 import { readBatchFile, batchFileExists } from '../utils/batchStorage'
 

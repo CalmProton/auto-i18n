@@ -1,17 +1,17 @@
 /**
  * Anthropic Batch Output Processor
- * Processes results from Anthropic's Message Batches API
+ * Parses JSON output from Anthropic's Message Batches API
  */
-import { readFile } from 'node:fs/promises'
-import { createScopedLogger } from '../../utils/logger'
-import { getBatchFilePath } from '../../utils/batchStorage'
-import type { BatchManifest, BatchRequestRecord } from './batchTypes'
+import { createScopedLogger } from '../../../../utils/logger'
+import { decodeUnicodeEscapes, loadManifest } from '../../common'
+import type { BatchManifest, BatchRequestRecord, ProcessedTranslation } from '../../types'
 
-const log = createScopedLogger('translation:anthropicBatchOutputProcessor')
+const log = createScopedLogger('batch:anthropic:output')
 
-/**
- * Anthropic batch result types
- */
+// ============================================================================
+// Types
+// ============================================================================
+
 export interface AnthropicBatchResult {
   custom_id: string
   result: {
@@ -39,69 +39,12 @@ export interface AnthropicBatchResult {
   }
 }
 
-export interface ProcessedTranslation {
-  customId: string
-  targetLocale: string
-  type: string
-  format: 'markdown' | 'json'
-  relativePath: string
-  folderPath?: string
-  fileName: string
-  translatedContent: string
-  status: 'success' | 'error'
-  errorMessage?: string
-}
+// ============================================================================
+// Parsing
+// ============================================================================
 
 /**
- * Decodes Unicode escape sequences to proper UTF-8
- */
-export function decodeUnicodeEscapes(text: string): string {
-  try {
-    return text.replace(/\\u([0-9a-fA-F]{4})/g, (match, hex) => {
-      return String.fromCharCode(parseInt(hex, 16))
-    })
-  } catch (error) {
-    log.warn('Failed to decode Unicode escapes', { error, textPreview: text.slice(0, 100) })
-    return text
-  }
-}
-
-/**
- * Extracts custom_id metadata parts (format, type, locale, hash, path)
- * Format: {format}_{type}_{locale}_{hash}_{pathFragment}
- */
-export function parseCustomId(customId: string): {
-  format: 'markdown' | 'json'
-  type: string
-  targetLocale: string
-  hash: string
-  pathFragment: string
-} | null {
-  const parts = customId.split('_')
-
-  if (parts.length < 5) {
-    log.warn('Invalid custom_id format', { customId })
-    return null
-  }
-
-  const [format, type, targetLocale, hash, ...pathFragments] = parts
-
-  if (!['markdown', 'json'].includes(format)) {
-    log.warn('Invalid format in custom_id', { customId, format })
-    return null
-  }
-
-  return {
-    format: format as 'markdown' | 'json',
-    type,
-    targetLocale,
-    hash,
-    pathFragment: pathFragments.join('_')
-  }
-}
-
-/**
- * Finds the matching BatchRequestRecord from manifest using custom_id
+ * Find a matching record in the manifest by custom_id
  */
 export function findRecordByCustomId(
   manifest: BatchManifest,
@@ -110,14 +53,17 @@ export function findRecordByCustomId(
   const record = manifest.files.find((file) => file.customId === customId)
 
   if (!record) {
-    log.warn('No matching record found in manifest', { customId, manifestFiles: manifest.files.length })
+    log.warn('No matching record found in manifest', {
+      customId,
+      manifestFiles: manifest.files.length
+    })
   }
 
   return record ?? null
 }
 
 /**
- * Extracts translated content from an Anthropic batch result
+ * Extract translated content from an Anthropic batch result
  */
 export function extractTranslatedContent(result: AnthropicBatchResult): string | null {
   try {
@@ -156,7 +102,6 @@ export function extractTranslatedContent(result: AnthropicBatchResult): string |
       return null
     }
 
-    // Decode Unicode escape sequences
     return decodeUnicodeEscapes(textContent)
   } catch (error) {
     log.error('Failed to extract translated content', {
@@ -167,8 +112,12 @@ export function extractTranslatedContent(result: AnthropicBatchResult): string |
   }
 }
 
+// ============================================================================
+// Main Processing
+// ============================================================================
+
 /**
- * Processes a complete Anthropic batch output file
+ * Process a complete Anthropic batch output file (JSON array)
  */
 export async function processBatchOutput(options: {
   senderId: string
@@ -179,12 +128,8 @@ export async function processBatchOutput(options: {
 
   log.info('Processing Anthropic batch output', { senderId, batchId })
 
-  // Load manifest
-  const manifestPath = getBatchFilePath(senderId, batchId, 'manifest.json')
-  const manifestContent = await readFile(manifestPath, 'utf8')
-  const manifest = JSON.parse(manifestContent) as BatchManifest
+  const manifest = loadManifest(senderId, batchId)
 
-  // Parse results (Anthropic returns JSON array, not JSONL)
   let results: AnthropicBatchResult[]
   try {
     results = JSON.parse(outputContent)
@@ -253,7 +198,7 @@ export async function processBatchOutput(options: {
   const successCount = processedResults.filter((r) => r.status === 'success').length
   const errorCount = processedResults.filter((r) => r.status === 'error').length
 
-  log.info('Finished processing Anthropic batch output', {
+  log.info('Anthropic batch output processing complete', {
     senderId,
     batchId,
     totalResults: results.length,

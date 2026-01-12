@@ -1,19 +1,10 @@
 /**
  * Anthropic Batch Service
  * Handles batch translation requests using Anthropic's Message Batches API
- * 
- * Anthropic's batch API differs from OpenAI in several key ways:
- * 1. Requests are sent directly as JSON (not JSONL files)
- * 2. Results are streamed via API (not file downloads)
- * 3. Processing status uses different terminology
  */
-import { createHash, randomUUID } from 'node:crypto'
-import { readdir, stat } from 'node:fs/promises'
-import { join } from 'node:path'
 import Anthropic from '@anthropic-ai/sdk'
 import type { MessageCreateParamsNonStreaming } from '@anthropic-ai/sdk/resources/messages'
-import { getTranslationConfig } from '../../config/env'
-import { SUPPORTED_LOCALES } from '../../config/locales'
+import { getTranslationConfig } from '../../../../config/env'
 import {
   TRANSLATION_SYSTEM_PROMPT,
   buildJsonTranslationPrompt,
@@ -21,18 +12,25 @@ import {
   JSON_RESPONSE_DIRECTIVE,
   JSON_TRANSLATION_WRAPPER_DIRECTIVE,
   MARKDOWN_RESPONSE_DIRECTIVE
-} from './prompts'
-import { resolveUploadPath } from '../../utils/fileStorage'
+} from '../../../translation/prompts'
+import { resolveUploadPath } from '../../../../utils/fileStorage'
 import {
   batchFileExists,
-  getBatchFilePath,
   readBatchFile,
-  sanitizeBatchSegment,
   writeBatchFile
-} from '../../utils/batchStorage'
-import { createScopedLogger } from '../../utils/logger'
-import type { TranslationFileType } from '../../types'
-import { stringifyJson } from './providerShared'
+} from '../../../../utils/batchStorage'
+import { createScopedLogger } from '../../../../utils/logger'
+import { stringifyJson } from '../../../translation/providerShared'
+import {
+  collectContentSources,
+  collectJsonSources,
+  getTargetLocales,
+  shouldIncludeFile,
+  buildCustomId,
+  loadManifest,
+  saveManifest,
+  generateAnthropicBatchId
+} from '../../common'
 import type {
   BatchManifest,
   BatchRequestRecord,
@@ -44,19 +42,59 @@ import type {
   CheckBatchStatusOptions,
   CheckBatchStatusResult,
   BatchTranslationType,
-  BatchRequestFormat,
-  shouldIncludeFile
-} from './batchTypes'
-import { shouldIncludeFile as checkIncludeFile } from './batchTypes'
+  BatchRequestFormat
+} from '../../types'
 
-const log = createScopedLogger('translation:anthropicBatch')
+const log = createScopedLogger('batch:anthropic')
 
 const DEFAULT_ANTHROPIC_MODEL = 'claude-3-haiku-20240307'
-const MANIFEST_FILE_NAME = 'manifest.json'
-const INPUT_FILE_NAME = 'input.json' // Anthropic uses JSON, not JSONL
+const INPUT_FILE_NAME = 'input.json'
 const BATCH_RESPONSE_NAME = 'anthropic-batch-response.json'
 
-// Anthropic batch request format
+// ============================================================================
+// Provider Configuration
+// ============================================================================
+
+interface AnthropicProviderConfig {
+  apiKey: string
+  baseUrl?: string
+  model?: string
+}
+
+function getAnthropicProviderInfo(): { model: string; providerConfig: AnthropicProviderConfig } {
+  const config = getTranslationConfig()
+
+  // Allow Anthropic batch even if not primary provider
+  if (config.providers.anthropic) {
+    const providerConfig = config.providers.anthropic
+    const model = providerConfig.model?.trim() || DEFAULT_ANTHROPIC_MODEL
+    return { model, providerConfig }
+  }
+
+  if (config.provider !== 'anthropic') {
+    throw new Error('Anthropic provider must be configured to use batch processing')
+  }
+
+  const providerConfig = config.providerConfig as AnthropicProviderConfig | undefined
+  if (!providerConfig) {
+    throw new Error('Anthropic provider configuration is missing API key')
+  }
+
+  const model = providerConfig.model?.trim() || DEFAULT_ANTHROPIC_MODEL
+  return { model, providerConfig }
+}
+
+function createAnthropicClient(providerConfig: AnthropicProviderConfig): Anthropic {
+  return new Anthropic({
+    apiKey: providerConfig.apiKey,
+    ...(providerConfig.baseUrl ? { baseURL: providerConfig.baseUrl } : {})
+  })
+}
+
+// ============================================================================
+// Request Building
+// ============================================================================
+
 interface AnthropicBatchRequest {
   custom_id: string
   params: MessageCreateParamsNonStreaming
@@ -67,136 +105,6 @@ interface BatchRequest {
   customId: string
   params: MessageCreateParamsNonStreaming
   record: BatchRequestRecord
-}
-
-function getAnthropicProviderInfo() {
-  const config = getTranslationConfig()
-  if (config.provider !== 'anthropic') {
-    // Check if anthropic is available in providers list
-    if (config.providers.anthropic) {
-      return {
-        model: config.providers.anthropic.model?.trim() || DEFAULT_ANTHROPIC_MODEL,
-        providerConfig: config.providers.anthropic
-      }
-    }
-    throw new Error('Anthropic provider must be configured to use batch processing')
-  }
-  const providerConfig = config.providerConfig
-  if (!providerConfig) {
-    throw new Error('Anthropic provider configuration is missing API key')
-  }
-  const resolvedModel = providerConfig.model?.trim() || DEFAULT_ANTHROPIC_MODEL
-  return {
-    model: resolvedModel,
-    providerConfig
-  }
-}
-
-function createAnthropicClient(providerConfig: { apiKey: string; baseUrl?: string }) {
-  return new Anthropic({
-    apiKey: providerConfig.apiKey,
-    ...(providerConfig.baseUrl ? { baseURL: providerConfig.baseUrl } : {})
-  })
-}
-
-async function collectContentSources(directory: string, relativeFolder = ''): Promise<BatchSourceFile[]> {
-  const entries = await readdir(directory, { withFileTypes: true }).catch(() => [])
-  const collected: BatchSourceFile[] = []
-
-  for (const entry of entries) {
-    const entryPath = join(directory, entry.name)
-    if (entry.isDirectory()) {
-      const nextRelative = relativeFolder ? `${relativeFolder}/${entry.name}` : entry.name
-      const nested = await collectContentSources(entryPath, nextRelative)
-      collected.push(...nested)
-    } else if (entry.isFile() && entry.name.toLowerCase().endsWith('.md')) {
-      const fileStat = await stat(entryPath)
-      const relativePath = relativeFolder ? `${relativeFolder}/${entry.name}` : entry.name
-      collected.push({
-        type: 'content',
-        format: 'markdown',
-        folderPath: relativeFolder || undefined,
-        filePath: entryPath,
-        relativePath,
-        fileName: entry.name,
-        size: fileStat.size
-      })
-    }
-  }
-
-  return collected
-}
-
-async function collectJsonSources(
-  type: Extract<BatchTranslationType, 'global' | 'page'>,
-  directory: string,
-  relativeFolder = ''
-): Promise<BatchSourceFile[]> {
-  const entries = await readdir(directory, { withFileTypes: true }).catch(() => [])
-  const collected: BatchSourceFile[] = []
-
-  for (const entry of entries) {
-    const entryPath = join(directory, entry.name)
-    if (entry.isDirectory()) {
-      const nextRelative = relativeFolder ? `${relativeFolder}/${entry.name}` : entry.name
-      const nested = await collectJsonSources(type, entryPath, nextRelative)
-      collected.push(...nested)
-    } else if (entry.isFile() && entry.name.toLowerCase().endsWith('.json')) {
-      const fileStat = await stat(entryPath)
-      const relativePath = relativeFolder ? `${relativeFolder}/${entry.name}` : entry.name
-      collected.push({
-        type,
-        format: 'json',
-        folderPath: relativeFolder || undefined,
-        filePath: entryPath,
-        relativePath,
-        fileName: entry.name,
-        size: fileStat.size
-      })
-    }
-  }
-
-  return collected
-}
-
-function getTargetLocales(sourceLocale: string, requested?: string[] | 'all'): string[] {
-  const supported = new Set(SUPPORTED_LOCALES.map((locale) => locale.code))
-  if (!supported.has(sourceLocale)) {
-    throw new Error(`Source locale "${sourceLocale}" is not supported`)
-  }
-  const allTargets = Array.from(supported).filter((code) => code !== sourceLocale).sort()
-  if (!requested || requested === 'all') {
-    return allTargets
-  }
-  if (requested.length === 0) {
-    return Array.from(supported).filter((code) => code !== sourceLocale).sort()
-  }
-  const normalized = requested.filter((code) => supported.has(code))
-  const targets = normalized.filter((code) => code !== sourceLocale)
-  if (targets.length === 0) {
-    throw new Error('No valid target locales provided')
-  }
-  return Array.from(new Set(targets)).sort()
-}
-
-function buildCustomId(
-  senderId: string,
-  targetLocale: string,
-  type: BatchTranslationType,
-  relativePath: string,
-  format: BatchRequestFormat
-): string {
-  const hash = createHash('sha1')
-    .update(senderId)
-    .update('\0')
-    .update(targetLocale)
-    .update('\0')
-    .update(type)
-    .update(relativePath)
-    .digest('hex')
-    .slice(0, 16)
-  const pathFragment = sanitizeBatchSegment(relativePath.replace(/\//g, '_')).slice(-24)
-  return `${format}_${type}_${targetLocale}_${hash}_${pathFragment}`
 }
 
 function buildMarkdownRequestParams(options: {
@@ -325,29 +233,20 @@ async function buildJsonRequests(options: {
   return requests
 }
 
-function loadManifest(senderId: string, batchId: string): BatchManifest {
-  const content = readBatchFile(senderId, batchId, MANIFEST_FILE_NAME)
-  const manifest = JSON.parse(content) as BatchManifest
-  return manifest
-}
-
-function saveManifest(senderId: string, batchId: string, manifest: BatchManifest): void {
-  const updated: BatchManifest = {
-    ...manifest,
-    updatedAt: new Date().toISOString()
-  }
-  writeBatchFile(senderId, batchId, MANIFEST_FILE_NAME, JSON.stringify(updated, null, 2))
-}
+// ============================================================================
+// Public API
+// ============================================================================
 
 /**
  * Create a batch for Anthropic Message Batches API
  */
 export async function createBatch(options: CreateBatchOptions): Promise<CreateBatchResult> {
   const { senderId, sourceLocale, targetLocales: requestedTargets, includeFiles, types } = options
-
   const { model } = getAnthropicProviderInfo()
 
-  const requestedTypes = types && types !== 'all' ? new Set<BatchTranslationType>(types) : null
+  const requestedTypes = types && types !== 'all'
+    ? new Set<BatchTranslationType>(types)
+    : null
 
   const sources: BatchSourceFile[] = []
 
@@ -370,7 +269,7 @@ export async function createBatch(options: CreateBatchOptions): Promise<CreateBa
   }
 
   const filteredSources = sources.filter((source) =>
-    checkIncludeFile(source.type, source.relativePath, includeFiles)
+    shouldIncludeFile(source.type, source.relativePath, includeFiles)
   )
 
   if (filteredSources.length === 0) {
@@ -379,18 +278,16 @@ export async function createBatch(options: CreateBatchOptions): Promise<CreateBa
 
   const targetLocales = getTargetLocales(sourceLocale, requestedTargets)
 
-  const markdownSources = filteredSources.filter((source) => source.format === 'markdown')
-  const jsonSources = filteredSources.filter((source) => source.format === 'json')
+  const markdownSources = filteredSources.filter((s) => s.format === 'markdown')
+  const jsonSources = filteredSources.filter((s) => s.format === 'json')
 
-  const markdownRequests =
-    markdownSources.length > 0
-      ? await buildMarkdownRequests({ senderId, sourceLocale, targetLocales, sources: markdownSources, model })
-      : []
+  const markdownRequests = markdownSources.length > 0
+    ? await buildMarkdownRequests({ senderId, sourceLocale, targetLocales, sources: markdownSources, model })
+    : []
 
-  const jsonRequests =
-    jsonSources.length > 0
-      ? await buildJsonRequests({ senderId, sourceLocale, targetLocales, sources: jsonSources, model })
-      : []
+  const jsonRequests = jsonSources.length > 0
+    ? await buildJsonRequests({ senderId, sourceLocale, targetLocales, sources: jsonSources, model })
+    : []
 
   const requests = [...markdownRequests, ...jsonRequests]
 
@@ -398,14 +295,12 @@ export async function createBatch(options: CreateBatchOptions): Promise<CreateBa
     throw new Error('Unable to generate any translation requests for the batch')
   }
 
-  // Anthropic has a limit of 100,000 requests per batch
   if (requests.length > 100000) {
     throw new Error(`Batch size exceeds Anthropic limit of 100,000 requests (${requests.length} requests)`)
   }
 
-  const batchId = `batch_anthropic_${sanitizeBatchSegment(sourceLocale)}_${Date.now()}_${randomUUID().slice(0, 8)}`
+  const batchId = generateAnthropicBatchId(sourceLocale)
 
-  // Store requests as JSON array (Anthropic format)
   const anthropicRequests: AnthropicBatchRequest[] = requests.map(({ customId, params }) => ({
     custom_id: customId,
     params
@@ -418,15 +313,7 @@ export async function createBatch(options: CreateBatchOptions): Promise<CreateBa
     JSON.stringify(anthropicRequests, null, 2)
   )
 
-  const sourceFileSummaries = filteredSources.map((source) => ({
-    type: source.type,
-    format: source.format,
-    relativePath: source.relativePath,
-    folderPath: source.folderPath,
-    size: source.size
-  }))
-
-  const manifestTypes = Array.from(new Set(requests.map((request) => request.record.type))).sort()
+  const manifestTypes = Array.from(new Set(requests.map((r) => r.record.type))).sort()
 
   const manifest: BatchManifest = {
     batchId,
@@ -437,7 +324,7 @@ export async function createBatch(options: CreateBatchOptions): Promise<CreateBa
     targetLocales,
     model,
     totalRequests: requests.length,
-    files: requests.map((request) => request.record),
+    files: requests.map((r) => r.record),
     status: 'draft',
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString()
@@ -452,9 +339,7 @@ export async function createBatch(options: CreateBatchOptions): Promise<CreateBa
     types: manifestTypes,
     targetLocales,
     fileCount: filteredSources.length,
-    requestCount: requests.length,
-    inputFilePath,
-    sourceFiles: sourceFileSummaries
+    requestCount: requests.length
   })
 
   return {
@@ -470,7 +355,7 @@ export async function createBatch(options: CreateBatchOptions): Promise<CreateBa
  * Submit a batch to Anthropic's Message Batches API
  */
 export async function submitBatch(options: SubmitBatchOptions): Promise<SubmitBatchResult> {
-  const { senderId, batchId, metadata } = options
+  const { senderId, batchId } = options
   const { providerConfig } = getAnthropicProviderInfo()
   const client = createAnthropicClient(providerConfig)
 
@@ -487,11 +372,9 @@ export async function submitBatch(options: SubmitBatchOptions): Promise<SubmitBa
     })
   }
 
-  // Read the requests from the input file
   const inputContent = readBatchFile(senderId, batchId, INPUT_FILE_NAME)
   const requests: AnthropicBatchRequest[] = JSON.parse(inputContent)
 
-  // Submit to Anthropic Message Batches API
   const batchResponse = await client.messages.batches.create({
     requests: requests.map((req) => ({
       custom_id: req.custom_id,
@@ -549,7 +432,6 @@ export async function checkBatchStatus(options: CheckBatchStatusOptions): Promis
   try {
     const batchStatus = await client.messages.batches.retrieve(anthropicBatchId)
 
-    // Update manifest with latest status
     const updatedManifest: BatchManifest = {
       ...manifest,
       anthropic: {
@@ -561,17 +443,13 @@ export async function checkBatchStatus(options: CheckBatchStatusOptions): Promis
       updatedAt: new Date().toISOString()
     }
 
-    // Map Anthropic status to our internal status
+    // Download results if batch is complete
     if (batchStatus.processing_status === 'ended') {
       updatedManifest.status = 'completed'
 
-      // Download results if available
       if (batchStatus.results_url) {
         try {
-          // Stream results and save them
           const results: unknown[] = []
-          // The results() method returns a Promise<JSONLDecoder> - await to get the decoder
-          // then iterate over the async iterable JSONLDecoder
           const resultsDecoder = await client.messages.batches.results(anthropicBatchId)
           for await (const result of resultsDecoder) {
             results.push(result)
@@ -592,29 +470,6 @@ export async function checkBatchStatus(options: CheckBatchStatusOptions): Promis
           log.error('Failed to download Anthropic results', { senderId, batchId, anthropicBatchId, error })
         }
       }
-
-      // Update change session status if this is a change session batch
-      try {
-        const { loadChangeSession, updateChangeSessionStatus } = await import('../../utils/changeStorage')
-        const changeSession = await loadChangeSession(senderId)
-
-        if (changeSession) {
-          await updateChangeSessionStatus(senderId, 'completed', {
-            completed: {
-              completed: true,
-              timestamp: new Date().toISOString(),
-              translationCount: batchStatus.request_counts?.succeeded
-            }
-          })
-          log.info('✅ Change session batch completed', {
-            senderId,
-            completedRequests: batchStatus.request_counts?.succeeded,
-            batchId
-          })
-        }
-      } catch (error) {
-        log.debug('Could not update change session (might not be a change session)', { senderId, error })
-      }
     } else if (batchStatus.processing_status === 'canceling') {
       updatedManifest.status = 'cancelled'
     }
@@ -629,24 +484,26 @@ export async function checkBatchStatus(options: CheckBatchStatusOptions): Promis
       requestCounts: batchStatus.request_counts
     })
 
+    const requestCounts = batchStatus.request_counts
+
     return {
       batchId,
       providerBatchId: anthropicBatchId,
       status: batchStatus.processing_status,
       provider: 'anthropic',
-      requestCounts: batchStatus.request_counts
+      requestCounts: requestCounts
         ? {
             total:
-              (batchStatus.request_counts.processing ?? 0) +
-              (batchStatus.request_counts.succeeded ?? 0) +
-              (batchStatus.request_counts.errored ?? 0) +
-              (batchStatus.request_counts.canceled ?? 0) +
-              (batchStatus.request_counts.expired ?? 0),
-            completed: batchStatus.request_counts.succeeded ?? 0,
-            failed: batchStatus.request_counts.errored ?? 0,
-            processing: batchStatus.request_counts.processing,
-            cancelled: batchStatus.request_counts.canceled,
-            expired: batchStatus.request_counts.expired
+              (requestCounts.processing ?? 0) +
+              (requestCounts.succeeded ?? 0) +
+              (requestCounts.errored ?? 0) +
+              (requestCounts.canceled ?? 0) +
+              (requestCounts.expired ?? 0),
+            completed: requestCounts.succeeded ?? 0,
+            failed: requestCounts.errored ?? 0,
+            processing: requestCounts.processing,
+            cancelled: requestCounts.canceled,
+            expired: requestCounts.expired
           }
         : undefined,
       resultsUrl: batchStatus.results_url ?? undefined
@@ -696,24 +553,26 @@ export async function cancelBatch(options: CheckBatchStatusOptions): Promise<Che
       processingStatus: batchStatus.processing_status
     })
 
+    const requestCounts = batchStatus.request_counts
+
     return {
       batchId,
       providerBatchId: anthropicBatchId,
       status: batchStatus.processing_status,
       provider: 'anthropic',
-      requestCounts: batchStatus.request_counts
+      requestCounts: requestCounts
         ? {
             total:
-              (batchStatus.request_counts.processing ?? 0) +
-              (batchStatus.request_counts.succeeded ?? 0) +
-              (batchStatus.request_counts.errored ?? 0) +
-              (batchStatus.request_counts.canceled ?? 0) +
-              (batchStatus.request_counts.expired ?? 0),
-            completed: batchStatus.request_counts.succeeded ?? 0,
-            failed: batchStatus.request_counts.errored ?? 0,
-            processing: batchStatus.request_counts.processing,
-            cancelled: batchStatus.request_counts.canceled,
-            expired: batchStatus.request_counts.expired
+              (requestCounts.processing ?? 0) +
+              (requestCounts.succeeded ?? 0) +
+              (requestCounts.errored ?? 0) +
+              (requestCounts.canceled ?? 0) +
+              (requestCounts.expired ?? 0),
+            completed: requestCounts.succeeded ?? 0,
+            failed: requestCounts.errored ?? 0,
+            processing: requestCounts.processing,
+            cancelled: requestCounts.canceled,
+            expired: requestCounts.expired
           }
         : undefined
     }
@@ -722,15 +581,3 @@ export async function cancelBatch(options: CheckBatchStatusOptions): Promise<Che
     throw error
   }
 }
-
-// Re-export types for convenience
-export type {
-  BatchManifest,
-  BatchRequestRecord,
-  CreateBatchOptions,
-  CreateBatchResult,
-  SubmitBatchOptions,
-  SubmitBatchResult,
-  CheckBatchStatusOptions,
-  CheckBatchStatusResult
-} from './batchTypes'

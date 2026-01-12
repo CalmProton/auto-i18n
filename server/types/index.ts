@@ -49,7 +49,9 @@ export interface SavedFileInfo {
 }
 
 export type TranslationFileType = FileType
-export type BatchProvider = 'openai' | 'anthropic'
+
+// Re-export BatchProvider from the batch module for consistency
+export type { BatchProvider } from '../services/batch/types'
 
 export interface TranslationFileDescriptor {
   type: TranslationFileType

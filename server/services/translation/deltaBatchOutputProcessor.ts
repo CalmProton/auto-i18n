@@ -7,7 +7,7 @@ import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs'
 import { join, dirname, basename } from 'node:path'
 import { createScopedLogger } from '../../utils/logger'
 import { getBatchFilePath, batchFileExists, readBatchFile } from '../../utils/batchStorage'
-import type { BatchManifest } from './openaiBatchService'
+import type { BatchManifest } from '../batch'
 import type { JsonDelta } from '../../types'
 
 const log = createScopedLogger('services:deltaBatchOutputProcessor')
