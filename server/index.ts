@@ -90,9 +90,15 @@ app.use(routes)
 
 // Serve static files from client/dist in production
 if (hasBuiltClient) {
+  // Type helper for route context
+  type StaticRouteContext = {
+    params: Record<string, string>
+    path: string
+  }
+
   // Serve static assets (js, css, images, etc.)
-  app.get('/assets/*', async ({ params }) => {
-    const filePath = join(clientDistPath, 'assets', params['*'])
+  app.get('/assets/*', async (ctx: StaticRouteContext) => {
+    const filePath = join(clientDistPath, 'assets', ctx.params['*'])
     const file = Bun.file(filePath)
     if (await file.exists()) {
       return new Response(file)
@@ -101,14 +107,14 @@ if (hasBuiltClient) {
   })
 
   // Serve other static files (favicon, etc.)
-  app.get('/*', async ({ params, path }) => {
+  app.get('/*', async (ctx: StaticRouteContext) => {
     // Skip API routes
-    if (path.startsWith('/api/')) {
+    if (ctx.path.startsWith('/api/')) {
       return new Response('Not Found', { status: 404 })
     }
 
     // Try to serve the exact file
-    const filePath = join(clientDistPath, params['*'] || '')
+    const filePath = join(clientDistPath, ctx.params['*'] || '')
     const file = Bun.file(filePath)
     if (await file.exists() && !(await file.stat())?.isDirectory?.()) {
       return new Response(file)
