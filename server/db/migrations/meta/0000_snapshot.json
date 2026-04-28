@@ -1,0 +1,216 @@
+{
+  "version": "7",
+  "dialect": "sqlite",
+  "tables": {
+    "settings": {
+      "name": "settings",
+      "columns": {
+        "key": { "name": "key", "type": "text", "primaryKey": true, "notNull": true, "autoincrement": false },
+        "value": { "name": "value", "type": "text", "primaryKey": false, "notNull": true, "autoincrement": false },
+        "updated_at": { "name": "updated_at", "type": "text", "primaryKey": false, "notNull": true, "autoincrement": false }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {}
+    },
+    "sessions": {
+      "name": "sessions",
+      "columns": {
+        "id": { "name": "id", "type": "text", "primaryKey": true, "notNull": true, "autoincrement": false },
+        "sender_id": { "name": "sender_id", "type": "text", "primaryKey": false, "notNull": true, "autoincrement": false },
+        "session_type": { "name": "session_type", "type": "text", "primaryKey": false, "notNull": true, "autoincrement": false },
+        "status": { "name": "status", "type": "text", "primaryKey": false, "notNull": true, "autoincrement": false, "default": "'pending'" },
+        "source_locale": { "name": "source_locale", "type": "text", "primaryKey": false, "notNull": true, "autoincrement": false },
+        "target_locales": { "name": "target_locales", "type": "text", "primaryKey": false, "notNull": true, "autoincrement": false },
+        "repo_owner": { "name": "repo_owner", "type": "text", "primaryKey": false, "notNull": false, "autoincrement": false },
+        "repo_name": { "name": "repo_name", "type": "text", "primaryKey": false, "notNull": false, "autoincrement": false },
+        "repo_branch": { "name": "repo_branch", "type": "text", "primaryKey": false, "notNull": false, "autoincrement": false },
+        "base_commit_sha": { "name": "base_commit_sha", "type": "text", "primaryKey": false, "notNull": false, "autoincrement": false },
+        "expires_at": { "name": "expires_at", "type": "text", "primaryKey": false, "notNull": false, "autoincrement": false },
+        "created_at": { "name": "created_at", "type": "text", "primaryKey": false, "notNull": true, "autoincrement": false },
+        "updated_at": { "name": "updated_at", "type": "text", "primaryKey": false, "notNull": true, "autoincrement": false }
+      },
+      "indexes": {
+        "sessions_sender_id_idx": { "name": "sessions_sender_id_idx", "columns": ["sender_id"], "isUnique": false },
+        "sessions_status_idx": { "name": "sessions_status_idx", "columns": ["status"], "isUnique": false },
+        "sessions_created_at_idx": { "name": "sessions_created_at_idx", "columns": ["created_at"], "isUnique": false }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "sessions_sender_id_unique": { "name": "sessions_sender_id_unique", "columns": ["sender_id"] }
+      }
+    },
+    "files": {
+      "name": "files",
+      "columns": {
+        "id": { "name": "id", "type": "text", "primaryKey": true, "notNull": true, "autoincrement": false },
+        "session_id": { "name": "session_id", "type": "text", "primaryKey": false, "notNull": true, "autoincrement": false },
+        "file_type": { "name": "file_type", "type": "text", "primaryKey": false, "notNull": true, "autoincrement": false },
+        "content_type": { "name": "content_type", "type": "text", "primaryKey": false, "notNull": true, "autoincrement": false },
+        "format": { "name": "format", "type": "text", "primaryKey": false, "notNull": true, "autoincrement": false },
+        "locale": { "name": "locale", "type": "text", "primaryKey": false, "notNull": true, "autoincrement": false },
+        "file_path": { "name": "file_path", "type": "text", "primaryKey": false, "notNull": true, "autoincrement": false },
+        "content": { "name": "content", "type": "text", "primaryKey": false, "notNull": true, "autoincrement": false },
+        "created_at": { "name": "created_at", "type": "text", "primaryKey": false, "notNull": true, "autoincrement": false }
+      },
+      "indexes": {
+        "files_session_file_type_idx": { "name": "files_session_file_type_idx", "columns": ["session_id", "file_type"], "isUnique": false },
+        "files_session_locale_idx": { "name": "files_session_locale_idx", "columns": ["session_id", "locale"], "isUnique": false }
+      },
+      "foreignKeys": {
+        "files_session_id_sessions_id_fk": { "name": "files_session_id_sessions_id_fk", "tableFrom": "files", "tableTo": "sessions", "columnsFrom": ["session_id"], "columnsTo": ["id"], "onDelete": "cascade", "onUpdate": "no action" }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {}
+    },
+    "batches": {
+      "name": "batches",
+      "columns": {
+        "id": { "name": "id", "type": "text", "primaryKey": true, "notNull": true, "autoincrement": false },
+        "session_id": { "name": "session_id", "type": "text", "primaryKey": false, "notNull": true, "autoincrement": false },
+        "provider": { "name": "provider", "type": "text", "primaryKey": false, "notNull": true, "autoincrement": false },
+        "status": { "name": "status", "type": "text", "primaryKey": false, "notNull": true, "autoincrement": false, "default": "'pending'" },
+        "external_batch_id": { "name": "external_batch_id", "type": "text", "primaryKey": false, "notNull": false, "autoincrement": false },
+        "manifest": { "name": "manifest", "type": "text", "primaryKey": false, "notNull": false, "autoincrement": false },
+        "total_requests": { "name": "total_requests", "type": "integer", "primaryKey": false, "notNull": true, "autoincrement": false, "default": 0 },
+        "completed": { "name": "completed", "type": "integer", "primaryKey": false, "notNull": true, "autoincrement": false, "default": 0 },
+        "failed": { "name": "failed", "type": "integer", "primaryKey": false, "notNull": true, "autoincrement": false, "default": 0 },
+        "created_at": { "name": "created_at", "type": "text", "primaryKey": false, "notNull": true, "autoincrement": false },
+        "updated_at": { "name": "updated_at", "type": "text", "primaryKey": false, "notNull": true, "autoincrement": false }
+      },
+      "indexes": {
+        "batches_session_idx": { "name": "batches_session_idx", "columns": ["session_id"], "isUnique": false },
+        "batches_status_idx": { "name": "batches_status_idx", "columns": ["status"], "isUnique": false }
+      },
+      "foreignKeys": {
+        "batches_session_id_sessions_id_fk": { "name": "batches_session_id_sessions_id_fk", "tableFrom": "batches", "tableTo": "sessions", "columnsFrom": ["session_id"], "columnsTo": ["id"], "onDelete": "cascade", "onUpdate": "no action" }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {}
+    },
+    "batch_requests": {
+      "name": "batch_requests",
+      "columns": {
+        "id": { "name": "id", "type": "text", "primaryKey": true, "notNull": true, "autoincrement": false },
+        "batch_id": { "name": "batch_id", "type": "text", "primaryKey": false, "notNull": true, "autoincrement": false },
+        "session_id": { "name": "session_id", "type": "text", "primaryKey": false, "notNull": true, "autoincrement": false },
+        "custom_id": { "name": "custom_id", "type": "text", "primaryKey": false, "notNull": true, "autoincrement": false },
+        "request_body": { "name": "request_body", "type": "text", "primaryKey": false, "notNull": true, "autoincrement": false },
+        "response_body": { "name": "response_body", "type": "text", "primaryKey": false, "notNull": false, "autoincrement": false },
+        "status": { "name": "status", "type": "text", "primaryKey": false, "notNull": true, "autoincrement": false, "default": "'pending'" }
+      },
+      "indexes": {
+        "batch_requests_batch_idx": { "name": "batch_requests_batch_idx", "columns": ["batch_id"], "isUnique": false }
+      },
+      "foreignKeys": {
+        "batch_requests_batch_id_batches_id_fk": { "name": "batch_requests_batch_id_batches_id_fk", "tableFrom": "batch_requests", "tableTo": "batches", "columnsFrom": ["batch_id"], "columnsTo": ["id"], "onDelete": "cascade", "onUpdate": "no action" },
+        "batch_requests_session_id_sessions_id_fk": { "name": "batch_requests_session_id_sessions_id_fk", "tableFrom": "batch_requests", "tableTo": "sessions", "columnsFrom": ["session_id"], "columnsTo": ["id"], "onDelete": "cascade", "onUpdate": "no action" }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {}
+    },
+    "git_jobs": {
+      "name": "git_jobs",
+      "columns": {
+        "id": { "name": "id", "type": "text", "primaryKey": true, "notNull": true, "autoincrement": false },
+        "session_id": { "name": "session_id", "type": "text", "primaryKey": false, "notNull": true, "autoincrement": false },
+        "forge": { "name": "forge", "type": "text", "primaryKey": false, "notNull": true, "autoincrement": false },
+        "issue_number": { "name": "issue_number", "type": "integer", "primaryKey": false, "notNull": false, "autoincrement": false },
+        "pr_number": { "name": "pr_number", "type": "integer", "primaryKey": false, "notNull": false, "autoincrement": false },
+        "pr_url": { "name": "pr_url", "type": "text", "primaryKey": false, "notNull": false, "autoincrement": false },
+        "branch": { "name": "branch", "type": "text", "primaryKey": false, "notNull": false, "autoincrement": false },
+        "status": { "name": "status", "type": "text", "primaryKey": false, "notNull": true, "autoincrement": false, "default": "'pending'" },
+        "error": { "name": "error", "type": "text", "primaryKey": false, "notNull": false, "autoincrement": false },
+        "created_at": { "name": "created_at", "type": "text", "primaryKey": false, "notNull": true, "autoincrement": false },
+        "updated_at": { "name": "updated_at", "type": "text", "primaryKey": false, "notNull": true, "autoincrement": false }
+      },
+      "indexes": {
+        "git_jobs_session_idx": { "name": "git_jobs_session_idx", "columns": ["session_id"], "isUnique": false }
+      },
+      "foreignKeys": {
+        "git_jobs_session_id_sessions_id_fk": { "name": "git_jobs_session_id_sessions_id_fk", "tableFrom": "git_jobs", "tableTo": "sessions", "columnsFrom": ["session_id"], "columnsTo": ["id"], "onDelete": "cascade", "onUpdate": "no action" }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "git_jobs_session_id_unique": { "name": "git_jobs_session_id_unique", "columns": ["session_id"] }
+      }
+    },
+    "jobs": {
+      "name": "jobs",
+      "columns": {
+        "id": { "name": "id", "type": "text", "primaryKey": true, "notNull": true, "autoincrement": false },
+        "session_id": { "name": "session_id", "type": "text", "primaryKey": false, "notNull": true, "autoincrement": false },
+        "job_type": { "name": "job_type", "type": "text", "primaryKey": false, "notNull": true, "autoincrement": false },
+        "status": { "name": "status", "type": "text", "primaryKey": false, "notNull": true, "autoincrement": false, "default": "'pending'" },
+        "payload": { "name": "payload", "type": "text", "primaryKey": false, "notNull": false, "autoincrement": false },
+        "error": { "name": "error", "type": "text", "primaryKey": false, "notNull": false, "autoincrement": false },
+        "run_after": { "name": "run_after", "type": "text", "primaryKey": false, "notNull": false, "autoincrement": false },
+        "attempts": { "name": "attempts", "type": "integer", "primaryKey": false, "notNull": true, "autoincrement": false, "default": 0 },
+        "max_attempts": { "name": "max_attempts", "type": "integer", "primaryKey": false, "notNull": true, "autoincrement": false, "default": 3 },
+        "heartbeat_at": { "name": "heartbeat_at", "type": "text", "primaryKey": false, "notNull": false, "autoincrement": false },
+        "created_at": { "name": "created_at", "type": "text", "primaryKey": false, "notNull": true, "autoincrement": false }
+      },
+      "indexes": {
+        "jobs_status_run_after_idx": { "name": "jobs_status_run_after_idx", "columns": ["status", "run_after"], "isUnique": false },
+        "jobs_session_idx": { "name": "jobs_session_idx", "columns": ["session_id"], "isUnique": false },
+        "jobs_job_type_idx": { "name": "jobs_job_type_idx", "columns": ["job_type"], "isUnique": false }
+      },
+      "foreignKeys": {
+        "jobs_session_id_sessions_id_fk": { "name": "jobs_session_id_sessions_id_fk", "tableFrom": "jobs", "tableTo": "sessions", "columnsFrom": ["session_id"], "columnsTo": ["id"], "onDelete": "cascade", "onUpdate": "no action" }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {}
+    },
+    "pipeline_events": {
+      "name": "pipeline_events",
+      "columns": {
+        "id": { "name": "id", "type": "text", "primaryKey": true, "notNull": true, "autoincrement": false },
+        "session_id": { "name": "session_id", "type": "text", "primaryKey": false, "notNull": true, "autoincrement": false },
+        "step": { "name": "step", "type": "text", "primaryKey": false, "notNull": true, "autoincrement": false },
+        "status": { "name": "status", "type": "text", "primaryKey": false, "notNull": true, "autoincrement": false },
+        "duration_ms": { "name": "duration_ms", "type": "integer", "primaryKey": false, "notNull": false, "autoincrement": false },
+        "request": { "name": "request", "type": "text", "primaryKey": false, "notNull": false, "autoincrement": false },
+        "response": { "name": "response", "type": "text", "primaryKey": false, "notNull": false, "autoincrement": false },
+        "error": { "name": "error", "type": "text", "primaryKey": false, "notNull": false, "autoincrement": false },
+        "created_at": { "name": "created_at", "type": "text", "primaryKey": false, "notNull": true, "autoincrement": false }
+      },
+      "indexes": {
+        "pipeline_events_session_idx": { "name": "pipeline_events_session_idx", "columns": ["session_id"], "isUnique": false },
+        "pipeline_events_session_step_idx": { "name": "pipeline_events_session_step_idx", "columns": ["session_id", "step"], "isUnique": false }
+      },
+      "foreignKeys": {
+        "pipeline_events_session_id_sessions_id_fk": { "name": "pipeline_events_session_id_sessions_id_fk", "tableFrom": "pipeline_events", "tableTo": "sessions", "columnsFrom": ["session_id"], "columnsTo": ["id"], "onDelete": "cascade", "onUpdate": "no action" }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {}
+    },
+    "api_request_logs": {
+      "name": "api_request_logs",
+      "columns": {
+        "id": { "name": "id", "type": "text", "primaryKey": true, "notNull": true, "autoincrement": false },
+        "session_id": { "name": "session_id", "type": "text", "primaryKey": false, "notNull": true, "autoincrement": false },
+        "provider": { "name": "provider", "type": "text", "primaryKey": false, "notNull": true, "autoincrement": false },
+        "model": { "name": "model", "type": "text", "primaryKey": false, "notNull": true, "autoincrement": false },
+        "request_body": { "name": "request_body", "type": "text", "primaryKey": false, "notNull": true, "autoincrement": false },
+        "response_body": { "name": "response_body", "type": "text", "primaryKey": false, "notNull": false, "autoincrement": false },
+        "status_code": { "name": "status_code", "type": "integer", "primaryKey": false, "notNull": false, "autoincrement": false },
+        "duration_ms": { "name": "duration_ms", "type": "integer", "primaryKey": false, "notNull": false, "autoincrement": false },
+        "is_mock": { "name": "is_mock", "type": "integer", "primaryKey": false, "notNull": true, "autoincrement": false, "default": 0 },
+        "created_at": { "name": "created_at", "type": "text", "primaryKey": false, "notNull": true, "autoincrement": false }
+      },
+      "indexes": {
+        "api_logs_session_idx": { "name": "api_logs_session_idx", "columns": ["session_id"], "isUnique": false },
+        "api_logs_provider_idx": { "name": "api_logs_provider_idx", "columns": ["provider"], "isUnique": false }
+      },
+      "foreignKeys": {
+        "api_request_logs_session_id_sessions_id_fk": { "name": "api_request_logs_session_id_sessions_id_fk", "tableFrom": "api_request_logs", "tableTo": "sessions", "columnsFrom": ["session_id"], "columnsTo": ["id"], "onDelete": "cascade", "onUpdate": "no action" }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {}
+    }
+  },
+  "enums": {},
+  "views": {}
+}

@@ -1,271 +1,231 @@
-# Auto-i18n Copilot Guide
+# Auto-i18n Agent Guide
 
-## Startup & tooling
+## Overview
 
-- **Runtime**: Bun v1.3.0+; install deps with `bun install`.
-- **Database**: PostgreSQL 18.1. Start with `bun run docker:db`.
-- **Migrations**: Run `bun run db:generate` to generate migrations, `bun run db:migrate` to apply them.
-- **API Server**: Run with `bun run dev` (uses `--hot` flag for hot reload). ElysiaJS listens on port 3000 by default (configurable via `PORT` env var).
-- **Vue Dashboard**: Run with `bun run client` (Vite dev server on port 5173).
-- **Routes**: Live under `server/routes`; add new endpoints by registering them in `routes/index.ts`. Use ElysiaJS patterns for route definitions.
-- **Type Safety**: Return `FileUploadResponse`/`ErrorResponse` shapes from `server/types/api.ts` for consistent API responses.
+Auto-i18n v2 is a single Nuxt 4 application (SPA + Nitro server) that automates i18n translation workflows. It replaces the old v1 ElysiaJS + Vue SPA + PostgreSQL architecture with a unified Nuxt 4 project using SQLite (`better-sqlite3`) for zero-setup storage.
 
-## Architecture snapshot
+## Startup & Tooling
 
-### Backend (ElysiaJS)
+- **Runtime**: Bun v1.3.0+
+- **Install deps**: `bun install`
+- **Dev server**: `bun run dev` — starts Nuxt dev server (frontend + Nitro API on same port)
+- **Production build**: `bun run build`
+- **DB migrations**: `bun run db:generate` / `bun run db:migrate`
+- **DB explorer**: `bun run db:studio`
+- **Typecheck**: `bun run typecheck`
+- **Lint**: `bun run lint` / `bun run lint:fix`
+- **Format**: `bun run format` / `bun run format:check`
 
-- `server/index.ts` boots an ElysiaJS app with CORS support, authentication middleware, database initialization, and queue workers.
-- **Database Layer**: `server/database/` provides Drizzle ORM (`connection.ts`) with Bun's native SQL bindings and schema definitions (`schema.ts`).
-- **Repositories**: `server/repositories/` provides data access layer using Drizzle ORM for `sessions`, `files`, `batches`, `translation_jobs`.
-- **Cache**: `server/cache/` provides in-memory LRU caching utilities and in-process pub/sub.
-- **Queues**: `server/queues/` provides PostgreSQL-based job queue using SKIP LOCKED pattern for async processing.
-- Auth routes (`/api/auth/*`) are mounted first and are not protected.
-- `authMiddleware` protects all other routes when `ACCESS_KEY` is set in environment.
-- Route modules are grouped: `content`, `global`, `page`, `batch`, `github`, `dashboard`.
+No Docker required. SQLite DB is auto-created at `tmp/auto-i18n.sqlite` on first boot.
 
-### Database Architecture
+## Architecture
 
-- **PostgreSQL**: Primary data store for sessions, files, batches, translation jobs, and job queue.
-- **Drizzle ORM**: Type-safe database layer with Bun's native SQL bindings. Schema in `server/database/schema.ts`.
-- **Job Queue**: PostgreSQL-based queue using SKIP LOCKED for safe concurrent job processing. No external dependencies required.
-- **Migrations**: Managed by Drizzle Kit in `server/database/migrations/`.
+### Stack
 
-### Frontend (Vue 3)
+- **Nuxt 4** (`future: { compatibilityVersion: 4 }`) — SPA (`ssr: false`)
+- **Nitro** — API routes under `server/api/`
+- **SQLite** via `better-sqlite3` + **Drizzle ORM** (`server/db/`)
+- **Tailwind CSS v4** via `@tailwindcss/vite` (no config file)
+- **Reka UI** for headless components
+- **Bun** as runtime and package manager
 
-- **Dashboard**: `client/components/DashboardLayout.vue` hosts tabs for Uploads, Batches, Translations, and GitHub.
-- **Composables**: Reusable logic in `client/composables/`:
-  - `useAuth` - Authentication state management
-  - `useBatches` - Batch operations and state
-  - `useTranslations` - Translation session management
-  - `useGitHub` - GitHub PR operations
-  - `useUploads` - Upload session management
-  - `useRefreshInterval` - Auto-refresh with pause/resume
-  - `useErrorBoundary` - Centralized error handling
-  - `useKeyboardShortcuts` - Keyboard navigation
-- **API Client**: `client/lib/api-client.ts` handles all HTTP requests with automatic access key injection.
-- **Components**: Use shadcn-vue components from `client/components/ui/` for consistent styling.
-- **Icons**: Use lucide-vue-next icons throughout the UI.
+### Directory Layout
 
-## Translation pipeline
+```
+auto-i18n/
+├── app/                        # Nuxt frontend (srcDir)
+│   ├── app.vue                 # Root component
+│   ├── assets/css/main.css     # Tailwind entry
+│   ├── components/
+│   │   ├── tabs/               # OverviewTab, SessionsTab, SettingsTab
+│   │   ├── session/            # SessionRow, SessionFiles, SessionEvents, etc.
+│   │   └── ui/                 # StatusBadge, SettingField
+│   ├── composables/
+│   │   └── useSSE.ts           # Server-Sent Events composable
+│   └── pages/
+│       ├── index.vue           # Tabbed dashboard shell
+│       └── sessions/[id].vue   # Session detail page
+├── server/
+│   ├── api/                    # Nitro route handlers
+│   │   ├── auth/status.get.ts
+│   │   ├── settings.get.ts / settings.put.ts
+│   │   ├── sessions/           # list, get, delete
+│   │   ├── translate/          # upload.post.ts, changes.post.ts
+│   │   ├── batch/              # get, submit
+│   │   ├── git/                # get, trigger
+│   │   ├── pipeline/           # events, logs
+│   │   ├── sse/[senderId].get.ts
+│   │   ├── overview.get.ts
+│   │   └── files/              # list, get
+│   ├── db/
+│   │   ├── sqlite.ts           # globalThis singleton connection
+│   │   ├── schema.ts           # Drizzle schema (sessions, files, batches, events, logs, settings)
+│   │   ├── index.ts            # Re-exports db + schema
+│   │   └── migrations/         # SQL migration files
+│   ├── middleware/
+│   │   └── auth.ts             # Optional ACCESS_KEY protection
+│   ├── plugins/
+│   │   └── 00.bootstrap.ts     # Runs migrations + seeds settings on startup
+│   ├── queue/
+│   │   └── index.ts            # globalThis job queue (realtime-translate, batch-poll, batch-process, git-finalize, cleanup)
+│   ├── repositories/           # Data access layer (sessions, files, batches, events, logs)
+│   ├── services/
+│   │   ├── translation/        # OpenRouter (realtime), OpenAI batch, Anthropic batch, mock, prompts
+│   │   └── git/                # GitHub, GitLab, webhook, none forges + workflow.ts
+│   └── utils/
+│       ├── auth.ts             # requireAuth helper
+│       ├── getSetting.ts       # Read settings from DB
+│       ├── locales.ts          # BCP-47 validation + display names
+│       └── sse.ts              # SSE stream registry (globalThis)
+├── nuxt.config.ts
+├── drizzle.config.ts
+├── tsconfig.json
+└── package.json
+```
 
-### Real-time Translation
+## Database
 
-- Translation triggers (`POST /content/translate`, `/global/translate`, `/page/translate`) read saved uploads.
-- `translateContentFiles`/`translateGlobalFile`/`translatePageFiles` write results to `tmp/<senderId>/translations/<targetLocale>/<type>`.
-- `services/translation/providers.ts` selects an adapter via `getTranslationConfig()`.
-- All provider adapters push work through `StaggeredRequestQueue` to throttle LLM calls.
+- **SQLite** at `tmp/auto-i18n.sqlite` (gitignored, auto-created)
+- **Schema** in `server/db/schema.ts` — tables: `sessions`, `files`, `batches`, `events`, `logs`, `settings`
+- **Migrations** in `server/db/migrations/` — applied automatically on boot via `server/plugins/00.bootstrap.ts`
+- **Drizzle ORM** for all queries — never raw SQL
 
-### Batch Translation (OpenAI Only)
+### Key Tables
 
-- **Create**: `POST /translate/batch` - Creates batch JSONL file from uploads.
-- **Submit**: `POST /translate/batch/{batchId}/submit` - Submits to OpenAI Batch API.
-- **Status**: `GET /translate/batch/{batchId}/status` - Polls batch status.
-- **Process**: `POST /translate/batch/{batchId}/process` - Processes completed batch output.
-- **Retry**: `POST /translate/batch/retry` - Creates new batch from failed requests.
-- Batch files stored in `tmp/<senderId>/batches/<batchId>/` with `input.jsonl`, `manifest.json`, and output files.
-- Use `services/translation/openaiBatchService.ts` for batch operations.
-- Use `services/translation/batchOutputProcessor.ts` to parse and save batch results.
+| Table | Purpose |
+|---|---|
+| `sessions` | Upload/changes translation sessions |
+| `files` | File content (upload, translation, delta) |
+| `batches` | OpenAI/Anthropic batch jobs |
+| `events` | Pipeline events per session |
+| `logs` | Raw log lines per session |
+| `settings` | Runtime-editable key/value config |
 
-## Provider configuration
+## Translation Pipeline
 
-- **Primary Provider**: Set via `TRANSLATION_PROVIDER` env var (`openai`, `anthropic`, `deepseek`).
-- **Provider Configs**: Each provider expects its own env vars:
-  - OpenAI: `OPENAI_API_KEY`, `OPENAI_MODEL` (default: `gpt-4o-mini`), optional `OPENAI_API_URL`
-  - Anthropic: `ANTHROPIC_API_KEY`, `ANTHROPIC_MODEL` (default: `claude-3-5-haiku-20241022`), optional `ANTHROPIC_API_URL`
-  - DeepSeek: `DEEPSEEK_API_KEY`, `DEEPSEEK_MODEL` (default: `deepseek-chat`), optional `DEEPSEEK_API_URL`
-- **Fallback**: If no API key is available, the fallback provider returns empty results and logs a warning.
-- **Provider Files**: Individual adapters in `services/translation/providers/` (`openaiProvider.ts`, `anthropicProvider.ts`, `deepseekProvider.ts`).
-- **API Logging**: Responses mirrored to `tmp/logs/api-responses-*.json` via `utils/apiResponseLogger`.
+### Real-time (OpenRouter)
+- `POST /api/translate/upload` or `/api/translate/changes` → creates session → enqueues `realtime-translate` job
+- Job calls OpenRouter API with selected model
+- Progress streamed via SSE at `GET /api/sse/:senderId`
 
-## Dashboard API
+### Batch (50% cost savings, async)
+- Submit: `POST /api/batch/:sessionId/submit` → sends to OpenAI Batch API or Anthropic Message Batches
+- Poll: queue runs `batch-poll` jobs every 60s until complete
+- Process: `batch-process` job writes translations back to DB
 
-RESTful endpoints for dashboard UI (`server/routes/dashboard.ts`):
+### Git Forge (delivery)
+- After translation: `git-finalize` job pushes translated files to the configured forge
+- `GIT_FORGE` setting: `github` | `gitlab` | `webhook` | `none`
+- GitHub: creates branch + commits + PR via raw fetch (no Octokit)
+- GitLab: creates branch + commits + MR via GitLab API
+- Webhook: POSTs translated files to `WEBHOOK_URL`
+- None: translations stored in DB only, retrievable via `GET /api/files/:sessionId`
 
-- **Stats**: `GET /api/stats` - System-wide statistics
-- **Uploads**: `GET /api/uploads` - List upload sessions with filtering
-- **Upload Details**: `GET /api/uploads/:senderId` - Detailed upload info
-- **Delete Upload**: `DELETE /api/uploads/:senderId` - Remove upload session
-- **Batches**: `GET /api/batches` - List all batches with status
-- **Batch Details**: `GET /api/batches/:batchId` - Batch info and manifest
-- **Delete Batch**: `DELETE /api/batches/:batchId` - Remove batch
-- **Translations**: `GET /api/translations` - List translation sessions
-- **Translation Status**: `GET /api/translations/:senderId` - Translation progress matrix
-- **GitHub Ready**: `GET /api/github/ready` - Sessions ready for PR creation
-- **Files**: `GET /api/files` - List files with filtering
+## Providers
 
-All dashboard endpoints use helper functions from `utils/dashboardUtils.ts`.
+### Real-time
+- **OpenRouter** (`OPENROUTER_API_KEY`, `OPENROUTER_MODEL`) — single key covers all models
 
-## GitHub synchronization
+### Batch
+- **OpenAI** (`OPENAI_API_KEY`, `OPENAI_BATCH_MODEL`) — OpenAI Batch API (async, 50% discount)
+- **Anthropic** (`ANTHROPIC_API_KEY`, `ANTHROPIC_BATCH_MODEL`) — Message Batches API
+- `BATCH_PROVIDER=auto` picks whichever has a key set
 
-- **Finalize**: `POST /github/finalize` calls `services/github/workflow.finalizeTranslationJob`.
-- Workflow: Loads metadata → Creates issue → Creates branch → Seed commit → Translation commit → Opens PR.
-- Target repo paths derived from `TranslationFileDescriptor`; override with `targetPathPattern`/`translationTempPathPattern`.
-- **Credentials**: `AUTO_I18N_GITHUB_TOKEN` (or `GITHUB_TOKEN`), optional `AUTO_I18N_GITHUB_API_URL`, `AUTO_I18N_GITHUB_APP_NAME`.
-- **Dry-run**: Set `dryRun: true` to validate metadata without creating PR.
+### Mock
+- `MOCK_MODE=true` — skips all LLM calls, returns placeholder translations
+
+## API Routes
+
+| Method | Path | Purpose |
+|---|---|---|
+| GET | `/api/auth/status` | Auth required? |
+| GET | `/api/settings` | List all settings |
+| PUT | `/api/settings` | Update settings |
+| GET | `/api/sessions` | List sessions |
+| GET | `/api/sessions/:id` | Session detail |
+| DELETE | `/api/sessions/:id` | Delete session |
+| POST | `/api/translate/upload` | Upload files for translation |
+| POST | `/api/translate/changes` | Submit changed files for translation |
+| GET | `/api/batch/:sessionId` | Batch status |
+| POST | `/api/batch/:sessionId/submit` | Submit batch job |
+| GET | `/api/git/:sessionId` | Git forge status |
+| POST | `/api/git/:sessionId/trigger` | Manually trigger git finalize |
+| GET | `/api/pipeline/:sessionId/events` | Session events |
+| GET | `/api/pipeline/:sessionId/logs` | Session logs |
+| GET | `/api/sse/:senderId` | SSE stream |
+| GET | `/api/overview` | Dashboard stats |
+| GET | `/api/files/:sessionId` | List files for session |
+| GET | `/api/files/:sessionId/:fileId` | Get file content |
 
 ## Authentication
 
-- **Optional**: Set `ACCESS_KEY` in environment to enable authentication.
-- **Middleware**: `authMiddleware` in `server/middleware/auth.ts` protects all routes except `/` and `/api/auth/*`.
-- **Check**: `GET /api/auth/check` - Returns whether auth is required.
-- **Validate**: `POST /api/auth/validate` - Validates provided access key.
-- **Client**: Access key stored in localStorage, sent via `X-Access-Key` header or `?access_key=` query param.
+- Optional: set `ACCESS_KEY` in `.env` to require auth
+- Header: `X-Access-Key: <key>` or query `?access_key=<key>`
+- `server/middleware/auth.ts` protects all routes except `/api/auth/*`
 
-## Testing
+## Settings (runtime-editable)
 
-### Backend Tests (Bun)
+All settings seeded in `settings` table, editable via UI or `PUT /api/settings`:
 
-- Location: `tests/server/**/*.test.ts`
-- Run: `bun run test:backend` or `bun test`
-- Coverage: Middleware, routes, services, utilities, configuration
-- Framework: Bun's built-in test runner
-- Pattern: `describe()` + `it()` + `expect()`
+| Key | Description |
+|---|---|
+| `OPENROUTER_API_KEY` | OpenRouter key |
+| `OPENROUTER_MODEL` | Model slug |
+| `OPENAI_API_KEY` | OpenAI key |
+| `OPENAI_BATCH_MODEL` | OpenAI batch model |
+| `ANTHROPIC_API_KEY` | Anthropic key |
+| `ANTHROPIC_BATCH_MODEL` | Anthropic batch model |
+| `BATCH_PROVIDER` | `auto` / `openai` / `anthropic` |
+| `GIT_FORGE` | `github` / `gitlab` / `webhook` / `none` |
+| `GITHUB_TOKEN` | GitHub PAT |
+| `GITHUB_API_URL` | GitHub API base |
+| `GIT_CREATE_ISSUES` | `true` / `false` |
+| `GITLAB_TOKEN` | GitLab PAT |
+| `GITLAB_API_URL` | GitLab API base |
+| `WEBHOOK_URL` | Webhook delivery URL |
+| `WEBHOOK_SECRET` | Webhook HMAC secret |
+| `TRANSLATE_PROMPT` | System prompt for translation |
+| `MOCK_MODE` | `true` / `false` |
 
-### Frontend Tests (Vitest)
+## Job Queue
 
-- Location: `tests/client/**/*.test.ts`
-- Run: `bun run test:client`
-- Coverage: Components, composables, API client
-- Framework: Vitest with @vue/test-utils
-- Environment: happy-dom
-- Pattern: `describe()` + `it()` + `expect()` + `mount()`
+- `server/queue/index.ts` — globalThis singleton, survives Nitro HMR
+- `bootRecover()` — on startup, re-queues any stuck `processing` jobs
+- `enqueueJob(type, payload, opts?)` — add job with optional delay + maxAttempts
+- Exponential backoff on failure (base 5s, max 5 min)
+- Job types: `realtime-translate`, `batch-poll`, `batch-process`, `git-finalize`, `cleanup`
 
-## Logging & conventions
+## SSE (Server-Sent Events)
 
-- **Scoped Logger**: Use `createScopedLogger('scope:name')` from `utils/logger.ts` for structured logging.
-- **Log Files**: Logs stream to stdout and `tmp/logs/latest.log` (configurable via env).
-- **Request Sanitization**: Sanitize inbound metadata through helpers in routes (see `sanitizeHeaders` pattern).
-- **Locales**: Add new locales to `config/locales.SUPPORTED_LOCALES`; helpers like `isSupportedLocale` depend on this list.
-- **Error Handling**: Use try-catch with proper error logging; return standardized `ErrorResponse` shapes.
-- **Type Safety**: Leverage TypeScript throughout; import types from `server/types` and `client/types`.
+- `server/utils/sse.ts` — globalThis stream registry
+- Frontend subscribes via `GET /api/sse/:senderId`
+- Events pushed from queue jobs as translation progresses
 
-## Database Schema
+## Conventions
 
-### Main Tables (PostgreSQL)
-
-- **sessions**: Upload/change sessions with repository & locale info
-- **translation_jobs**: Individual jobs within sessions
-- **files**: All file types (upload, translation, delta, original) with content stored as TEXT
-- **batches**: OpenAI batch jobs with manifest as JSONB
-- **batch_requests**: Individual requests within batches
-- **job_queue**: PostgreSQL-based job queue for async processing
-- **translation_stats**: Dashboard statistics
-
-### Repository Pattern
-
-Use repositories in `server/repositories/` for all database operations:
-
-```typescript
-import { createSession, getSessionBySenderId } from '../repositories'
-
-// Create session
-const session = await createSession({
-  senderId: 'my-sender',
-  sessionType: 'upload',
-  sourceLocale: 'en',
-})
-
-// Query session
-const existing = await getSessionBySenderId('my-sender')
-```
-
-### Cache Pattern
-
-Use in-memory cache utilities in `server/cache/` for caching and pub/sub:
-
-```typescript
-import { cacheGet, cacheSet, publish, Channels } from '../cache'
-
-// Cache data (in-memory LRU cache)
-await cacheSet('key', data, 300) // 5 minute TTL
-const cached = await cacheGet('key', true) // parse JSON
-
-// Publish events (in-process only)
-await publish(Channels.batchCompleted, { batchId, status: 'completed' })
-```
-
-### Queue Pattern
-
-Use PostgreSQL-based queues in `server/queues/` for async processing:
-
-```typescript
-import { addBatchPollJob, addGitHubFinalizeJob } from '../queues'
-
-// Add polling job with delay
-await addBatchPollJob({ batchId, senderId, openaiBatchId }, { delay: 30000 })
-
-// Add finalization job
-await addGitHubFinalizeJob({ senderId, sessionId })
-```
-
-## File Storage Structure (Legacy - Being Migrated to Database)
-
-```text
-tmp/
-└── {senderId}/
-    ├── metadata.json              # Job metadata
-    ├── uploads/
-    │   └── {locale}/              # Source locale
-    │       ├── content/           # Markdown files
-    │       ├── global/            # Global JSON translations
-    │       └── page/              # Page-specific JSON translations
-    ├── batches/
-    │   └── {batchId}/
-    │       ├── input.jsonl        # Batch input requests
-    │       ├── manifest.json      # Batch metadata
-    │       ├── {batch_id}_output.jsonl   # OpenAI output
-    │       └── {batch_id}_error.jsonl    # OpenAI errors
-    └── translations/
-        └── {targetLocale}/        # Target locale
-            ├── content/           # Translated markdown
-            ├── global/            # Translated global JSON
-            └── page/              # Translated page JSON
-```
-
-## Key Dependencies
-
-**Backend:**
-
-- ElysiaJS, @elysiajs/cors, drizzle-orm, openai, @anthropic-ai/sdk, winston, zod
-
-**Frontend:**
-
-- Vue 3, Vite, Tailwind CSS v4, shadcn-vue (reka-ui), lucide-vue-next, @vueuse/core
-
-**Testing:**
-
-- Bun (backend), Vitest + @vue/test-utils (frontend)
-
-**Runtime:**
-
-- Bun v1.3.0+
-- Use bunx and other bun commands when needed.
+- **No `~/` imports in `.vue` files** — Nuxt 4 `srcDir` is `app/`, so `~` resolves to `app/`. Use relative imports or Nuxt auto-imports.
+- **No raw SQL** — all DB access via Drizzle ORM through repositories
+- **globalThis pattern** — SQLite connection, SSE registry, and job queue all use `globalThis` to survive HMR
+- **Bun runtime** — use `bun`, `bunx`; never npm/yarn/pnpm
+- **TypeScript strict** — no `any`; use `unknown` and narrow
+- **Error handling** — use `createError()` in Nitro handlers; catch with `unknown`
 
 ## Common Tasks
 
-### Add a new route
+### Add a new API route
+1. Create `server/api/<path>.<method>.ts`
+2. Use `defineEventHandler`, `readBody`, `getRouterParam` from `h3`
+3. Auth check via `requireAuth(event)` from `~/server/utils/auth`
 
-1. Create route file in `server/routes/{name}.ts` using ElysiaJS patterns
-2. Register in `server/routes/index.ts`: `routes.use(yourRoutes)`
-3. Define response types in `server/types/api.ts`
+### Add a new setting
+1. Add seed entry in `server/plugins/00.bootstrap.ts`
+2. Add UI field in `app/components/tabs/SettingsTab.vue`
+3. Read it via `getSetting(key)` from `server/utils/getSetting.ts`
+
+### Add a new git forge
+1. Implement `GitForge` interface in `server/services/git/`
+2. Register in `server/services/git/workflow.ts` forge selector
 
 ### Add a new translation provider
-
-1. Create provider file in `services/translation/providers/{provider}Provider.ts`
-2. Implement `TranslationProvider` interface
-3. Add provider config to `config/env.ts`
-4. Update `providers.ts` to include new provider
-
-### Add a new dashboard tab
-
-1. Create component in `client/components/{Name}Tab.vue`
-2. Add composable in `client/composables/use{Name}.ts` if needed
-3. Register tab in `DashboardLayout.vue`
-4. Add API endpoints in `server/routes/dashboard.ts`
-
-### Debug translations
-
-1. Check `tmp/logs/api-responses-*.json` for raw AI provider responses
-2. Check `tmp/logs/latest.log` for structured logs
-3. Enable debug logging in provider files if needed
-4. Verify batch manifest in `tmp/{senderId}/batches/{batchId}/manifest.json`
+1. Implement provider in `server/services/translation/`
+2. Wire into `server/queue/index.ts` job handlers

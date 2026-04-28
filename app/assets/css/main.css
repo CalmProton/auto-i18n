@@ -1,0 +1,65 @@
+@import "tailwindcss";
+
+@theme {
+  /* Minimal dark palette */
+  --color-*: initial;
+
+  --color-black:    #000000;
+  --color-white:    #FFFFFF;
+  --color-gray-50:  #F5F5F5;
+  --color-gray-100: #E5E5E5;
+  --color-gray-200: #CCCCCC;
+  --color-gray-300: #999999;
+  --color-gray-400: #666666;
+  --color-gray-500: #444444;
+  --color-gray-600: #2A2A2A;
+  --color-gray-700: #1A1A1A;
+  --color-gray-800: #111111;
+  --color-gray-900: #0A0A0A;
+
+  --color-accent:   #3B82F6;
+  --color-success:  #22C55E;
+  --color-error:    #EF4444;
+  --color-warning:  #F59E0B;
+  --color-info:     #06B6D4;
+  --color-muted:    #666666;
+
+  --color-transparent: transparent;
+
+  /* Monospace everywhere */
+  --font-mono: ui-monospace, "SF Mono", "Cascadia Code", "Fira Code", monospace;
+
+  /* No border radius */
+  --radius-*: initial;
+  --radius-none: 0px;
+  --radius: 0px;
+
+  /* No shadows */
+  --shadow-*: initial;
+  --shadow-none: none;
+  --shadow: none;
+}
+
+/* Base input style */
+.i18n-input {
+  @apply w-full bg-black border border-gray-600 px-3 py-2 text-white font-mono text-sm
+         focus:border-accent focus:outline-none placeholder:text-gray-500;
+}
+
+/* Status badge colours */
+.status-pending    { @apply text-gray-400 border-gray-600; }
+.status-processing { @apply text-warning  border-warning; }
+.status-completed  { @apply text-success  border-success; }
+.status-failed     { @apply text-error    border-error; }
+.status-expired    { @apply text-gray-500 border-gray-600; }
+
+/* Thin scrollbars */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #2A2A2A #000000;
+}
+*::-webkit-scrollbar        { width: 6px; height: 6px; }
+*::-webkit-scrollbar-track  { background: #000000; }
+*::-webkit-scrollbar-thumb  { background: #2A2A2A; }
+*::-webkit-scrollbar-thumb:hover { background: #444444; }
+*::-webkit-scrollbar-corner { background: #000000; }

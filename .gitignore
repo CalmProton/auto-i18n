@@ -1,10 +1,20 @@
 # deps
 node_modules/
-tmp
-.env
-TODO.md
-.DS_Store
 
-# client build
-client/dist
+# env
+.env
+
+# Nuxt
+.nuxt/
+.output/
+.nitro/
+.cache/
+.data/
+
+# SQLite DB
+tmp/
+
+# misc
+.DS_Store
+TODO.md
 .claude/settings.json
