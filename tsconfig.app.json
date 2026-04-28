@@ -22,7 +22,6 @@
     "noUncheckedSideEffectImports": true,
 
     /* Path resolution */
-    "baseUrl": ".",
     "paths": {
       "@/*": ["./client/*"],
       "@client/*": ["./client/*"],

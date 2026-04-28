@@ -1,0 +1,280 @@
+name: Auto i18n Initial File Upload
+
+on:
+  workflow_dispatch:
+    inputs:
+      locale:
+        description: "Default language/locale (e.g., en, fr, es)"
+        required: true
+        default: "en"
+      targetLocales:
+        description: "Comma-separated list of target languages/locales (e.g., en, fr, es)"
+        required: true
+        default: "ru,zh,hi,es,fr,ar,bn,pt,id,de,ja,ko,tr,vi,it,fa,pl,nl,ro,el,cs,hu,sv,bg,da,fi,sk,hr,no,sl,sr"
+
+jobs:
+  send-translations:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Send content translations
+        env:
+          ENDPOINT: ${{ vars['AUTO_I18N_ENDPOINT'] }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          LOCALE="${{ github.event.inputs.locale }}"
+          echo "Sending content for locale: $LOCALE"
+
+          if [ -z "$ENDPOINT" ]; then
+            echo "AUTO_I18N_ENDPOINT repository variable is not set."
+            exit 1
+          fi
+
+          COMMIT_SHORT=$(echo "${GITHUB_SHA:-}" | cut -c1-7)
+          SENDER_ID=$(echo "$REPOSITORY" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9._-]/-/g')
+          if [ -n "$COMMIT_SHORT" ]; then
+            SENDER_ID="${SENDER_ID}-${COMMIT_SHORT}"
+          fi
+
+          REPO_OWNER=$(echo "$REPOSITORY" | cut -d/ -f1)
+          REPO_NAME=$(echo "$REPOSITORY" | cut -d/ -f2)
+          BASE_BRANCH="${GITHUB_REF_NAME:-master}"
+          BASE_COMMIT_SHA="${GITHUB_SHA:-}"
+          SOURCE_LOCALE_VALUE="en"
+          
+          # Convert comma-separated targetLocales to JSON array
+          TARGET_LOCALES="${{ github.event.inputs.targetLocales }}"
+          TARGET_LOCALE_JSON=""
+          IFS=',' read -ra LOCALE_ARRAY <<< "$TARGET_LOCALES"
+          for i in "${!LOCALE_ARRAY[@]}"; do
+            LOCALE_TRIMMED=$(echo "${LOCALE_ARRAY[$i]}" | xargs)
+            if [ $i -eq 0 ]; then
+              TARGET_LOCALE_JSON="\"$LOCALE_TRIMMED\""
+            else
+              TARGET_LOCALE_JSON="$TARGET_LOCALE_JSON,\"$LOCALE_TRIMMED\""
+            fi
+          done
+
+          CONTENT_DIR="content/$LOCALE"
+          FILES=()
+          if [ -d "$CONTENT_DIR" ]; then
+            while IFS= read -r -d '' FILE; do
+              FILES+=("$FILE")
+            done < <(find "$CONTENT_DIR" -type f -name "*.md" -print0)
+          fi
+
+          if [ "${#FILES[@]}" -eq 0 ]; then
+            echo "No content files found for $LOCALE"
+          else
+            REQUEST_URL="$ENDPOINT/translate/content?locale=$LOCALE&senderId=$SENDER_ID"
+            echo "Uploading ${#FILES[@]} content file(s) in batch to $REQUEST_URL"
+
+            # Build files array for metadata
+            FILES_JSON=""
+            CURL_FILES=()
+            FILE_INDEX=0
+            
+            for FILE in "${FILES[@]}"; do
+              RELATIVE="${FILE#$CONTENT_DIR/}"
+              RELATIVE_PATH="${RELATIVE//\\/\/}"
+              SOURCE_TEMP=$(basename "$RELATIVE_PATH")
+              REPO_SOURCE_PATH="content/$LOCALE/$RELATIVE_PATH"
+              
+              # Generate proper field name expected by server
+              FIELD_NAME_RELATIVE="${RELATIVE_PATH%.*}"
+              FIELD="folder_${FIELD_NAME_RELATIVE//\//_}"
+              FIELD=$(echo "$FIELD" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9_]/_/g')
+              FIELD="${FIELD//__/_}"
+              FIELD="${FIELD%_}"
+              FIELD="${FIELD:-folder_file}"
+              
+              # Add to files JSON array
+              if [ -n "$FILES_JSON" ]; then
+                FILES_JSON="$FILES_JSON,"
+              fi
+              FILES_JSON="$FILES_JSON{\"sourceTempRelativePath\":\"$SOURCE_TEMP\",\"repositorySourcePath\":\"$REPO_SOURCE_PATH\"}"
+              
+              # Add to curl form data
+              CURL_FILES+=("-F" "$FIELD=@$FILE")
+            done
+
+            # Build simplified batch metadata
+            JOBS_JSON="\"content-batch\":{\"type\":\"content\",\"files\":[$FILES_JSON]}"
+            METADATA=$(printf '{"repository":{"owner":"%s","name":"%s","baseBranch":"%s","baseCommitSha":"%s"},"sourceLocale":"%s","targetLocales":[%s],"jobs":{%s}}' "$REPO_OWNER" "$REPO_NAME" "$BASE_BRANCH" "$BASE_COMMIT_SHA" "$SOURCE_LOCALE_VALUE" "$TARGET_LOCALE_JSON" "$JOBS_JSON")
+
+            # Send single batch request
+            curl --fail-with-body --silent --show-error -X POST "$REQUEST_URL" \
+              --form-string "senderId=$SENDER_ID" \
+              --form-string "locale=$LOCALE" \
+              --form-string "jobId=content-batch" \
+              --form-string "metadata=$METADATA" \
+              "${CURL_FILES[@]}"
+          fi
+
+      - name: Send global translations
+        env:
+          ENDPOINT: ${{ vars['AUTO_I18N_ENDPOINT'] }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          LOCALE="${{ github.event.inputs.locale }}"
+          GLOBAL_FILE="i18n/locales/$LOCALE.json"
+
+          if [ -z "$ENDPOINT" ]; then
+            echo "AUTO_I18N_ENDPOINT repository variable is not set."
+            exit 1
+          fi
+
+          if [ -f "$GLOBAL_FILE" ]; then
+            COMMIT_SHORT=$(echo "${GITHUB_SHA:-}" | cut -c1-7)
+            SENDER_ID=$(echo "$REPOSITORY" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9._-]/-/g')
+            if [ -n "$COMMIT_SHORT" ]; then
+              SENDER_ID="${SENDER_ID}-${COMMIT_SHORT}"
+            fi
+
+            REPO_OWNER=$(echo "$REPOSITORY" | cut -d/ -f1)
+            REPO_NAME=$(echo "$REPOSITORY" | cut -d/ -f2)
+            BASE_BRANCH="${GITHUB_REF_NAME:-master}"
+            BASE_COMMIT_SHA="${GITHUB_SHA:-}"
+            SOURCE_LOCALE_VALUE="en"
+            
+            # Convert comma-separated targetLocales to JSON array
+            TARGET_LOCALES="${{ github.event.inputs.targetLocales }}"
+            TARGET_LOCALE_JSON=""
+            IFS=',' read -ra LOCALE_ARRAY <<< "$TARGET_LOCALES"
+            for i in "${!LOCALE_ARRAY[@]}"; do
+              LOCALE_TRIMMED=$(echo "${LOCALE_ARRAY[$i]}" | xargs)
+              if [ $i -eq 0 ]; then
+                TARGET_LOCALE_JSON="\"$LOCALE_TRIMMED\""
+              else
+                TARGET_LOCALE_JSON="$TARGET_LOCALE_JSON,\"$LOCALE_TRIMMED\""
+              fi
+            done
+
+            JOB_ID="global-batch"
+            SOURCE_TEMP=$(basename "$GLOBAL_FILE")
+            REPO_SOURCE_PATH="$GLOBAL_FILE"
+            JOBS_JSON=$(printf '"%s":{"type":"global","files":[{"sourceTempRelativePath":"%s","repositorySourcePath":"%s"}]}' "$JOB_ID" "$SOURCE_TEMP" "$REPO_SOURCE_PATH")
+            METADATA=$(printf '{"repository":{"owner":"%s","name":"%s","baseBranch":"%s","baseCommitSha":"%s"},"sourceLocale":"%s","targetLocales":[%s],"jobs":{%s}}' "$REPO_OWNER" "$REPO_NAME" "$BASE_BRANCH" "$BASE_COMMIT_SHA" "$SOURCE_LOCALE_VALUE" "$TARGET_LOCALE_JSON" "$JOBS_JSON")
+
+            REQUEST_URL="$ENDPOINT/translate/global?locale=$LOCALE&senderId=$SENDER_ID"
+            echo "Uploading global translation file $GLOBAL_FILE to $REQUEST_URL"
+            curl --fail-with-body --silent --show-error -X POST "$REQUEST_URL" \
+              --form-string "senderId=$SENDER_ID" \
+              --form-string "locale=$LOCALE" \
+              --form-string "jobId=$JOB_ID" \
+              --form-string "metadata=$METADATA" \
+              -F "file=@$GLOBAL_FILE"
+          else
+            echo "No global translation file found for $LOCALE"
+          fi
+
+      - name: Send page translations
+        env:
+          ENDPOINT: ${{ vars['AUTO_I18N_ENDPOINT'] }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          LOCALE="${{ github.event.inputs.locale }}"
+
+          if [ -z "$ENDPOINT" ]; then
+            echo "AUTO_I18N_ENDPOINT repository variable is not set."
+            exit 1
+          fi
+
+          PAGE_BASE="i18n/locales/pages"
+          PAGE_FILES=()
+          if [ -d "$PAGE_BASE" ]; then
+            while IFS= read -r -d '' FILE; do
+              PAGE_FILES+=("$FILE")
+            done < <(find "$PAGE_BASE" -type f -name "$LOCALE.json" -print0)
+          fi
+
+          if [ "${#PAGE_FILES[@]}" -eq 0 ]; then
+            echo "No page translation files found for $LOCALE"
+          else
+            COMMIT_SHORT=$(echo "${GITHUB_SHA:-}" | cut -c1-7)
+            SENDER_ID=$(echo "$REPOSITORY" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9._-]/-/g')
+            if [ -n "$COMMIT_SHORT" ]; then
+              SENDER_ID="${SENDER_ID}-${COMMIT_SHORT}"
+            fi
+            REPO_OWNER=$(echo "$REPOSITORY" | cut -d/ -f1)
+            REPO_NAME=$(echo "$REPOSITORY" | cut -d/ -f2)
+            BASE_BRANCH="${GITHUB_REF_NAME:-master}"
+            BASE_COMMIT_SHA="${GITHUB_SHA:-}"
+            SOURCE_LOCALE_VALUE="en"
+            
+            # Convert comma-separated targetLocales to JSON array
+            TARGET_LOCALES="${{ github.event.inputs.targetLocales }}"
+            TARGET_LOCALE_JSON=""
+            IFS=',' read -ra LOCALE_ARRAY <<< "$TARGET_LOCALES"
+            for i in "${!LOCALE_ARRAY[@]}"; do
+              LOCALE_TRIMMED=$(echo "${LOCALE_ARRAY[$i]}" | xargs)
+              if [ $i -eq 0 ]; then
+                TARGET_LOCALE_JSON="\"$LOCALE_TRIMMED\""
+              else
+                TARGET_LOCALE_JSON="$TARGET_LOCALE_JSON,\"$LOCALE_TRIMMED\""
+              fi
+            done
+
+            REQUEST_URL="$ENDPOINT/translate/page?locale=$LOCALE&senderId=$SENDER_ID"
+            echo "Uploading ${#PAGE_FILES[@]} page translation file(s) in batch to $REQUEST_URL"
+
+            # Build files array for metadata
+            FILES_JSON=""
+            CURL_FILES=()
+            FILE_INDEX=0
+            
+            for FILE in "${PAGE_FILES[@]}"; do
+              RELATIVE="${FILE#$PAGE_BASE/}"
+              RELATIVE_PATH="${RELATIVE//\\/\/}"
+              SOURCE_TEMP=$(basename "$RELATIVE_PATH")
+              RELATIVE_DIR=$(dirname "$RELATIVE_PATH")
+              
+              # Extract slug from directory structure
+              if [ "$RELATIVE_DIR" = "." ]; then
+                SLUG="${SOURCE_TEMP%.*}"
+              else
+                SLUG="$RELATIVE_DIR"
+              fi
+              SLUG=$(echo "$SLUG" | tr '[:upper:]' '[:lower:]')
+              SLUG=${SLUG#/}
+              SLUG=${SLUG%/}
+              if [ -z "$SLUG" ]; then
+                SLUG="root"
+              fi
+              
+              # Generate proper field name expected by server
+              FIELD_RELATIVE_DIR=$(dirname "$RELATIVE")
+              if [ "$FIELD_RELATIVE_DIR" = "." ]; then
+                FIELD_RELATIVE_DIR="root"
+              fi
+              FIELD="folder_${FIELD_RELATIVE_DIR//\//_}"
+              FIELD=$(echo "$FIELD" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9_]/_/g')
+              FIELD="${FIELD//__/_}"
+              FIELD="${FIELD%_}"
+              FIELD="${FIELD:-folder_page}"
+              
+              REPO_SOURCE_PATH="$PAGE_BASE/$RELATIVE_PATH"
+              
+              # Add to files JSON array
+              if [ -n "$FILES_JSON" ]; then
+                FILES_JSON="$FILES_JSON,"
+              fi
+              FILES_JSON="$FILES_JSON{\"sourceTempRelativePath\":\"$SOURCE_TEMP\",\"repositorySourcePath\":\"$REPO_SOURCE_PATH\",\"slug\":\"$SLUG\"}"
+              
+              # Add to curl form data
+              CURL_FILES+=("-F" "$FIELD=@$FILE")
+            done
+
+            # Build simplified batch metadata
+            JOBS_JSON="\"pages-batch\":{\"type\":\"page\",\"files\":[$FILES_JSON]}"
+            METADATA=$(printf '{"repository":{"owner":"%s","name":"%s","baseBranch":"%s","baseCommitSha":"%s"},"sourceLocale":"%s","targetLocales":[%s],"jobs":{%s}}' "$REPO_OWNER" "$REPO_NAME" "$BASE_BRANCH" "$BASE_COMMIT_SHA" "$SOURCE_LOCALE_VALUE" "$TARGET_LOCALE_JSON" "$JOBS_JSON")
+
+            # Send single batch request
+            curl --fail-with-body --silent --show-error -X POST "$REQUEST_URL" \
+              --form-string "senderId=$SENDER_ID" \
+              --form-string "locale=$LOCALE" \
+              --form-string "jobId=pages-batch" \
+              --form-string "metadata=$METADATA" \
+              "${CURL_FILES[@]}"
+          fi
