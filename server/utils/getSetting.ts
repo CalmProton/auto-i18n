@@ -122,6 +122,8 @@ const DEFAULTS: Record<string, string> = {
   MOCK_MODE: 'false',
   GIT_FORGE: 'none',
   GIT_CREATE_ISSUES: 'false',
+  GITHUB_API_URL: 'https://api.github.com',
+  GITLAB_API_URL: 'https://gitlab.com',
 }
 
 /** Insert default settings if not already present. Called on bootstrap. */

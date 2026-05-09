@@ -30,9 +30,13 @@
           Git Forge
         </div>
         <SettingField v-model="form['GIT_FORGE']" label="Git Forge (none/github/gitlab/webhook)" name="GIT_FORGE" />
-        <SettingField v-model="form['GIT_TOKEN']" label="Git Token" name="GIT_TOKEN" sensitive />
+        <SettingField v-model="form['GITHUB_TOKEN']" label="GitHub Token" name="GITHUB_TOKEN" sensitive />
+        <SettingField v-model="form['GITHUB_API_URL']" label="GitHub API URL" name="GITHUB_API_URL" />
+        <SettingField v-model="form['GITLAB_TOKEN']" label="GitLab Token" name="GITLAB_TOKEN" sensitive />
+        <SettingField v-model="form['GITLAB_API_URL']" label="GitLab API URL" name="GITLAB_API_URL" />
         <SettingField v-model="form['GIT_CREATE_ISSUES']" label="Create Issues (true/false)" name="GIT_CREATE_ISSUES" />
         <SettingField v-model="form['WEBHOOK_URL']" label="Webhook URL" name="WEBHOOK_URL" />
+        <SettingField v-model="form['WEBHOOK_SECRET']" label="Webhook Secret" name="WEBHOOK_SECRET" sensitive />
 
         <div class="px-4 py-2 bg-gray-900 border-b border-gray-700 border-t border-t-gray-700 text-xs uppercase tracking-wider text-gray-400">
           Prompts
