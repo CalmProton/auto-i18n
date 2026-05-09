@@ -32,9 +32,9 @@ export function invalidateProviderCache(): void {
 
 /**
  * Get the configured batch provider name.
- * Returns 'openai' | 'anthropic' | null if neither is configured.
+ * Returns 'openai' | 'anthropic' | 'openrouter' | null if none is configured.
  */
-export async function getBatchProviderName(): Promise<'openai' | 'anthropic' | null> {
+export async function getBatchProviderName(): Promise<'openai' | 'anthropic' | 'openrouter' | null> {
   const configured = (await getSetting('BATCH_PROVIDER')) ?? 'auto'
 
   if (configured === 'openai') {
@@ -45,13 +45,19 @@ export async function getBatchProviderName(): Promise<'openai' | 'anthropic' | n
     const key = await getSetting('ANTHROPIC_API_KEY')
     return key ? 'anthropic' : null
   }
+  if (configured === 'openrouter') {
+    const key = await getSetting('OPENROUTER_API_KEY')
+    return key ? 'openrouter' : null
+  }
 
-  // auto: pick whichever has a key, prefer openai
-  const [openaiKey, anthropicKey] = await Promise.all([
+  // auto: pick whichever has a key, prefer native batch providers first
+  const [openaiKey, anthropicKey, openrouterKey] = await Promise.all([
     getSetting('OPENAI_API_KEY'),
     getSetting('ANTHROPIC_API_KEY'),
+    getSetting('OPENROUTER_API_KEY'),
   ])
   if (openaiKey) return 'openai'
   if (anthropicKey) return 'anthropic'
+  if (openrouterKey) return 'openrouter'
   return null
 }

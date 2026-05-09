@@ -19,10 +19,11 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.64.0",
+    "@openrouter/agent": "^0.5.0",
     "@vueuse/core": "^13.9.0",
     "better-sqlite3": "^12.9.0",
-    "clsx": "^2.1.1",
     "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
     "drizzle-orm": "^0.45.0",
     "lucide-vue-next": "^0.545.0",
     "nuxt": "^4",

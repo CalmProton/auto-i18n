@@ -10,6 +10,7 @@ import {
   submitAnthropicBatch,
   processAnthropicBatchOutput,
 } from './providers/anthropic-batch'
+import { processOpenRouterBatch } from './providers/openrouter-batch'
 import { getBatchProviderName } from './index'
 import type { BatchRequest } from './types'
 
@@ -132,6 +133,11 @@ export async function submitBatch(batchDbId: string): Promise<string> {
     externalId = await submitOpenAIBatch(jsonl)
   } else if (batch.provider === 'anthropic') {
     externalId = await submitAnthropicBatch(batchItems)
+  } else if (batch.provider === 'openrouter') {
+    // OpenRouter batch processes immediately via parallel real-time calls.
+    // No external submission — we process inline below and mark as completed.
+    await processOpenRouterBatchOutput(batchDbId, batchItems)
+    return 'openrouter-inline'
   } else {
     throw new Error(`Unknown batch provider: ${batch.provider}`)
   }
@@ -190,6 +196,76 @@ export async function processBatchOutput(batchDbId: string): Promise<void> {
     }
 
     // Save translated file
+    await db.insert(files).values({
+      sessionId: batch.sessionId,
+      fileType: 'translation',
+      contentType: sourceFile.contentType,
+      format: sourceFile.format,
+      locale: targetLocale,
+      filePath: sourceFile.filePath,
+      content: result.content,
+    }).onConflictDoUpdate({
+      target: [files.sessionId, files.fileType, files.locale, files.filePath],
+      set: { content: result.content, createdAt: new Date().toISOString() },
+    })
+
+    completed++
+  }
+
+  await db.update(batches).set({
+    status: failed > 0 && completed === 0 ? 'failed' : 'completed',
+    completed,
+    failed,
+    updatedAt: new Date().toISOString(),
+  }).where(eq(batches.id, batchDbId))
+}
+
+/**
+ * Process OpenRouter batch output — parallel real-time translation through
+ * OpenRouter. Used when BATCH_PROVIDER=openrouter (or auto with only
+ * OpenRouter key). Processes inline (no async polling needed).
+ */
+export async function processOpenRouterBatchOutput(
+  batchDbId: string,
+  batchItems: BatchRequest[],
+): Promise<void> {
+  const [batch] = await db.select().from(batches).where(eq(batches.id, batchDbId))
+  if (!batch) throw new Error(`Batch ${batchDbId} not found`)
+
+  const [session] = await db.select().from(schema.sessions).where(eq(schema.sessions.id, batch.sessionId))
+  if (!session) throw new Error(`Session ${batch.sessionId} not found`)
+
+  await db.update(batches).set({
+    status: 'processing',
+    updatedAt: new Date().toISOString(),
+  }).where(eq(batches.id, batchDbId))
+
+  const results = await processOpenRouterBatch(batchItems)
+
+  const uploadedFiles = await db.select().from(files)
+    .where(and(eq(files.sessionId, batch.sessionId), eq(files.fileType, 'upload')))
+  const fileById = new Map(uploadedFiles.map(f => [f.id, f]))
+
+  let completed = 0
+  let failed = 0
+
+  for (const result of results) {
+    const [fileId, targetLocale] = result.customId.split('::')
+    const sourceFile = fileById.get(fileId!)
+
+    await db.update(batchRequests).set({
+      responseBody: JSON.stringify(result),
+      status: result.error ? 'failed' : 'completed',
+    }).where(and(
+      eq(batchRequests.batchId, batchDbId),
+      eq(batchRequests.customId, result.customId),
+    ))
+
+    if (result.error || !sourceFile || !targetLocale || !result.content) {
+      failed++
+      continue
+    }
+
     await db.insert(files).values({
       sessionId: batch.sessionId,
       fileType: 'translation',

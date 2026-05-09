@@ -23,8 +23,17 @@
         <div class="px-4 py-2 bg-gray-900 border-b border-gray-700 border-t border-t-gray-700 text-xs uppercase tracking-wider text-gray-400">
           Translation
         </div>
-        <SettingField v-model="form['BATCH_PROVIDER']" label="Batch Provider (auto/openai/anthropic)" name="BATCH_PROVIDER" />
+        <SettingField v-model="form['BATCH_PROVIDER']" label="Batch Provider (auto/openai/anthropic/openrouter)" name="BATCH_PROVIDER" />
         <SettingField v-model="form['MOCK_MODE']" label="Mock Mode (true/false)" name="MOCK_MODE" />
+
+        <div class="px-4 py-2 bg-gray-900 border-b border-gray-700 border-t border-t-gray-700 text-xs uppercase tracking-wider text-gray-400">
+          OpenRouter Options
+        </div>
+        <SettingField v-model="form['TRANSLATE_TEMPERATURE_MARKDOWN']" label="Temperature (markdown)" name="TRANSLATE_TEMPERATURE_MARKDOWN" />
+        <SettingField v-model="form['TRANSLATE_TEMPERATURE_JSON']" label="Temperature (JSON)" name="TRANSLATE_TEMPERATURE_JSON" />
+        <SettingField v-model="form['OPENROUTER_TRANSFORMS']" label="Transforms (none or comma-separated)" name="OPENROUTER_TRANSFORMS" />
+        <SettingField v-model="form['OPENROUTER_FALLBACK_MODELS']" label="Fallback Models (comma-separated)" name="OPENROUTER_FALLBACK_MODELS" />
+        <SettingField v-model="form['OPENROUTER_PROVIDER_ORDER']" label="Provider Order (comma-separated)" name="OPENROUTER_PROVIDER_ORDER" />
 
         <div class="px-4 py-2 bg-gray-900 border-b border-gray-700 border-t border-t-gray-700 text-xs uppercase tracking-wider text-gray-400">
           Git Forge

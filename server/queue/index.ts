@@ -269,6 +269,9 @@ async function handleBatchPoll(job: Job): Promise<void> {
     pollResult = await pollOpenAIBatch(batch.externalBatchId)
   } else if (batch.provider === 'anthropic') {
     pollResult = await pollAnthropicBatch(batch.externalBatchId)
+  } else if (batch.provider === 'openrouter') {
+    // OpenRouter batches process inline — batch is already done at submit time
+    return
   } else {
     throw new Error(`Unknown batch provider: ${batch.provider}`)
   }

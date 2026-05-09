@@ -124,6 +124,11 @@ const DEFAULTS: Record<string, string> = {
   GIT_CREATE_ISSUES: 'false',
   GITHUB_API_URL: 'https://api.github.com',
   GITLAB_API_URL: 'https://gitlab.com',
+  TRANSLATE_TEMPERATURE_MARKDOWN: '0.3',
+  TRANSLATE_TEMPERATURE_JSON: '0.1',
+  OPENROUTER_TRANSFORMS: 'none',
+  OPENROUTER_FALLBACK_MODELS: '',
+  OPENROUTER_PROVIDER_ORDER: '',
 }
 
 /** Insert default settings if not already present. Called on bootstrap. */
