@@ -33,18 +33,21 @@ No Docker required. SQLite DB is auto-created at `tmp/auto-i18n.sqlite` on first
 
 ```
 auto-i18n/
-├── app/                        # Nuxt frontend (srcDir)
-│   ├── app.vue                 # Root component
-│   ├── assets/css/main.css     # Tailwind entry
-│   ├── components/
-│   │   ├── tabs/               # OverviewTab, SessionsTab, SettingsTab
-│   │   ├── session/            # SessionRow, SessionFiles, SessionEvents, etc.
-│   │   └── ui/                 # StatusBadge, SettingField
-│   ├── composables/
-│   │   └── useSSE.ts           # Server-Sent Events composable
-│   └── pages/
-│       ├── index.vue           # Tabbed dashboard shell
-│       └── sessions/[id].vue   # Session detail page
+├── app.vue                     # Root component
+├── assets/
+│   └── css/main.css            # Tailwind entry
+├── components/
+│   ├── tabs/                   # OverviewTab, SessionsTab, BatchesTab, TranslationsTab, GitTab, SettingsTab
+│   ├── session/                # SessionRow, SessionFiles, SessionEvents, SessionLogs, SessionBatch, SessionGit
+│   └── ui/                     # StatusBadge, SettingField
+├── composables/
+│   └── useSSE.ts               # Server-Sent Events composable
+├── pages/
+│   ├── index.vue               # 6-tab dashboard shell (Alt+0-5 shortcuts)
+│   └── sessions/[id].vue       # Session detail with sub-tabs (Files, Events, Logs, Batch, Git)
+├── plugins/                    # Nuxt plugins (empty — Nitro plugins live in server/plugins/)
+├── public/                     # Static assets (empty)
+├── middleware/                  # Nuxt route middleware (empty — Nitro middleware lives in server/middleware/)
 ├── server/
 │   ├── api/                    # Nitro route handlers
 │   │   ├── auth/status.get.ts
